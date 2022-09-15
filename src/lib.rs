@@ -1,5 +1,3 @@
+mod scoped_spawn;
 
-
-pub fn main() {
-
-}
+pub use scoped_spawn::*;
