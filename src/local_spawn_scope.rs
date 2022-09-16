@@ -16,9 +16,8 @@ use std::{
 
 use crate::ScopedSpawn;
 
-type IncomingPad<'sc> = Rc<RefCell<VecDeque<LocalFutureObj<'sc, ()>>>>;
+type IncomingPad<'sc> = Rc<RefCell<Option<VecDeque<LocalFutureObj<'sc, ()>>>>>;
 
-#[derive(Default)]
 pub struct LocalSpawnScope<'sc> {
     futures: FuturesUnordered<LocalFutureObj<'sc, ()>>,
     incoming: IncomingPad<'sc>,
@@ -26,7 +25,10 @@ pub struct LocalSpawnScope<'sc> {
 
 impl<'sc> LocalSpawnScope<'sc> {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            futures: FuturesUnordered::new(),
+            incoming: Rc::new(RefCell::new(Some(VecDeque::new()))),
+        }
     }
 
     pub fn spawner(&self) -> LocalSpawnScopeSpawner<'sc> {
@@ -42,6 +44,11 @@ impl<'sc> LocalSpawnScope<'sc> {
         }
     }
 
+    pub fn cancel(&mut self) {
+        self.drain_incoming();
+        self.incoming.borrow_mut().take();
+    }
+
     pub fn until_stalled(&mut self) -> UntilStalled<'_, 'sc> {
         UntilStalled { scope: self }
     }
@@ -52,9 +59,20 @@ impl<'sc> LocalSpawnScope<'sc> {
 
     fn drain_incoming(&mut self) -> bool {
         let mut incoming = self.incoming.borrow_mut();
-        let has_incoming = !incoming.is_empty();
-        self.futures.extend(incoming.drain(..));
-        has_incoming
+        if let Some(incoming) = incoming.as_mut() {
+            let has_incoming = !incoming.is_empty();
+            self.futures.extend(incoming.drain(..));
+            has_incoming
+        } else {
+            false
+        }
+    }
+}
+
+impl<'sc> Drop for LocalSpawnScope<'sc> {
+    fn drop(&mut self) {
+        // Close the stream so that spawners can give a shutdown error
+        self.incoming.borrow_mut().take();
     }
 }
 
@@ -149,8 +167,13 @@ impl<'sc> LocalSpawnScopeSpawner<'sc> {
         &self,
         future: LocalFutureObj<'sc, ()>,
     ) -> Result<(), SpawnError> {
-        self.scope.borrow_mut().push_back(future);
-        Ok(())
+        let mut incoming = self.scope.borrow_mut();
+        if let Some(incoming) = incoming.as_mut() {
+            incoming.push_back(future);
+            Ok(())
+        } else {
+            Result::Err(SpawnError::shutdown())
+        }
     }
 
     pub fn spawn_local_scoped<Fut>(&self, future: Fut) -> Result<(), SpawnError>
@@ -196,6 +219,29 @@ mod tests {
         let inner_spawner = spawn.spawner();
         spawner
             .spawn_local_scoped(async move {
+                let mut inner_scope = LocalSpawnScope::new();
+
+                inner_scope
+                    .spawner()
+                    .spawn_local_scoped(async {
+                        println!("  inner scope");
+                        inner_spawner
+                            .spawn_local_scoped(async { println!("from inner scope") })
+                            .unwrap();
+                    })
+                    .unwrap();
+
+                inner_scope
+                    .spawner()
+                    .spawn_local_scoped(async {
+                        println!("  inner scope2");
+                        inner_spawner
+                            .spawn_local_scoped(async { println!("from inner scope2") })
+                            .unwrap();
+                    })
+                    .unwrap();
+
+
                 println!("outer {}", value.0);
                 inner_spawner
                     .spawn_local_scoped(async move {
@@ -204,6 +250,10 @@ mod tests {
                         //pending::<()>().await;
                     })
                     .unwrap();
+
+                println!("before inner_scope.until.empty()");
+                inner_scope.until_empty().await;
+                println!("after inner_scope.until.empty()");
             })
             .unwrap();
 
@@ -219,6 +269,7 @@ mod tests {
             println!("before until_stalled");
             spawn.until_stalled().await;
             println!("after until_stalled");
+            spawn.cancel();
             sx2.send(3).unwrap();
             let result = spawn.until(rx).await.unwrap();
             println!("after until");
