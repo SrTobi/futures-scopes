@@ -1,8 +1,8 @@
-use futures::task::{FutureObj, Spawn, SpawnError};
+use futures::task::{FutureObj, SpawnError};
 use std::future::Future;
 
-pub trait ScopedSpawn<'a>: Spawn {
-    fn spawn_obj_scoped(&self, future: FutureObj<'a, ()>) -> Result<(), SpawnError>;
+pub trait ScopedSpawn<'a, T> {
+    fn spawn_obj_scoped(&self, future: FutureObj<'a, T>) -> Result<(), SpawnError>;
 
     #[inline]
     fn status_scoped(&self) -> Result<(), SpawnError> {
@@ -10,10 +10,10 @@ pub trait ScopedSpawn<'a>: Spawn {
     }
 }
 
-pub trait ScopedSpawnExt<'a>: ScopedSpawn<'a> {
+pub trait ScopedSpawnExt<'a, T>: ScopedSpawn<'a, T> {
     fn spawn_scoped<Fut>(&self, future: Fut) -> Result<(), SpawnError>
     where
-        Fut: Future<Output = ()> + Send + 'a,
+        Fut: Future<Output = T> + Send + 'a,
     {
         self.spawn_obj_scoped(FutureObj::new(Box::new(future)))
     }

@@ -8,6 +8,7 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     future::Future,
+    mem,
     ops::DerefMut,
     pin::Pin,
     rc::Rc,
@@ -16,28 +17,30 @@ use std::{
 
 use crate::ScopedSpawn;
 
-type IncomingPad<'sc> = Rc<RefCell<Option<VecDeque<LocalFutureObj<'sc, ()>>>>>;
+type IncomingPad<'sc, T> = Rc<RefCell<Option<VecDeque<LocalFutureObj<'sc, T>>>>>;
 
-pub struct LocalSpawnScope<'sc> {
-    futures: FuturesUnordered<LocalFutureObj<'sc, ()>>,
-    incoming: IncomingPad<'sc>,
+pub struct LocalSpawnScope<'sc, T = ()> {
+    futures: FuturesUnordered<LocalFutureObj<'sc, T>>,
+    incoming: IncomingPad<'sc, T>,
+    result: Vec<T>,
 }
 
-impl<'sc> LocalSpawnScope<'sc> {
+impl<'sc, T> LocalSpawnScope<'sc, T> {
     pub fn new() -> Self {
         Self {
             futures: FuturesUnordered::new(),
             incoming: Rc::new(RefCell::new(Some(VecDeque::new()))),
+            result: Vec::new(),
         }
     }
 
-    pub fn spawner(&self) -> LocalSpawnScopeSpawner<'sc> {
+    pub fn spawner(&self) -> LocalSpawnScopeSpawner<'sc, T> {
         LocalSpawnScopeSpawner {
             scope: self.incoming.clone(),
         }
     }
 
-    pub fn until<Fut: Future>(&mut self, fut: Fut) -> Until<'_, 'sc, Fut> {
+    pub fn until<Fut: Future>(&mut self, fut: Fut) -> Until<'_, 'sc, T, Fut> {
         Until {
             scope: self,
             future: fut,
@@ -49,12 +52,20 @@ impl<'sc> LocalSpawnScope<'sc> {
         self.incoming.borrow_mut().take();
     }
 
-    pub fn until_stalled(&mut self) -> UntilStalled<'_, 'sc> {
+    pub fn until_stalled(&mut self) -> UntilStalled<'_, 'sc, T> {
         UntilStalled { scope: self }
     }
 
-    pub fn until_empty(&mut self) -> UntilEmpty<'_, 'sc> {
+    pub fn until_empty(&mut self) -> UntilEmpty<'_, 'sc, T> {
         UntilEmpty { scope: self }
+    }
+
+    pub fn results(&self) -> &Vec<T> {
+        &self.result
+    }
+
+    pub fn take_results(mut self) -> Vec<T> {
+        mem::take(&mut self.result)
     }
 
     fn drain_incoming(&mut self) -> bool {
@@ -69,7 +80,7 @@ impl<'sc> LocalSpawnScope<'sc> {
     }
 }
 
-impl<'sc> Drop for LocalSpawnScope<'sc> {
+impl<'sc, T> Drop for LocalSpawnScope<'sc, T> {
     fn drop(&mut self) {
         // Close the stream so that spawners can give a shutdown error
         self.incoming.borrow_mut().take();
@@ -77,14 +88,14 @@ impl<'sc> Drop for LocalSpawnScope<'sc> {
 }
 
 pin_project! {
-    pub struct Until<'s, 'sc, Fut> {
-        scope: &'s mut LocalSpawnScope<'sc>,
+    pub struct Until<'s, 'sc, T, Fut> {
+        scope: &'s mut LocalSpawnScope<'sc, T>,
         #[pin]
         future: Fut,
     }
 }
 
-impl<'s, 'sc, Fut: Future> Future for Until<'s, 'sc, Fut> {
+impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
     type Output = Fut::Output;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -99,7 +110,10 @@ impl<'s, 'sc, Fut: Future> Future for Until<'s, 'sc, Fut> {
         loop {
             scope.drain_incoming();
             match scope.futures.poll_next_unpin(cx) {
-                Poll::Ready(Some(())) => continue,
+                Poll::Ready(Some(result)) => {
+                    scope.result.push(result);
+                    continue;
+                }
                 Poll::Ready(None) => return Poll::Pending,
                 Poll::Pending => return Poll::Pending,
             };
@@ -107,11 +121,11 @@ impl<'s, 'sc, Fut: Future> Future for Until<'s, 'sc, Fut> {
     }
 }
 
-pub struct UntilStalled<'s, 'sc> {
-    scope: &'s mut LocalSpawnScope<'sc>,
+pub struct UntilStalled<'s, 'sc, T> {
+    scope: &'s mut LocalSpawnScope<'sc, T>,
 }
 
-impl<'s, 'sc> Future for UntilStalled<'s, 'sc> {
+impl<'s, 'sc, T> Future for UntilStalled<'s, 'sc, T> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
@@ -125,7 +139,10 @@ impl<'s, 'sc> Future for UntilStalled<'s, 'sc> {
             }
 
             match scope.futures.poll_next_unpin(&mut noop_ctx) {
-                Poll::Ready(Some(())) => continue,
+                Poll::Ready(Some(result)) => {
+                    scope.result.push(result);
+                    continue;
+                }
                 Poll::Ready(None) => (),
                 Poll::Pending => (),
             };
@@ -134,18 +151,21 @@ impl<'s, 'sc> Future for UntilStalled<'s, 'sc> {
     }
 }
 
-pub struct UntilEmpty<'s, 'sc> {
-    scope: &'s mut LocalSpawnScope<'sc>,
+pub struct UntilEmpty<'s, 'sc, T> {
+    scope: &'s mut LocalSpawnScope<'sc, T>,
 }
 
-impl<'s, 'sc> Future for UntilEmpty<'s, 'sc> {
+impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let scope = self.scope.deref_mut();
         loop {
             let result = match scope.futures.poll_next_unpin(cx) {
-                Poll::Ready(Some(())) => continue,
+                Poll::Ready(Some(result)) => {
+                    scope.result.push(result);
+                    continue;
+                }
                 Poll::Ready(None) => Poll::Ready(()),
                 Poll::Pending => Poll::Pending,
             };
@@ -157,16 +177,20 @@ impl<'s, 'sc> Future for UntilEmpty<'s, 'sc> {
     }
 }
 
-#[derive(Clone)]
-pub struct LocalSpawnScopeSpawner<'sc> {
-    scope: IncomingPad<'sc>,
+pub struct LocalSpawnScopeSpawner<'sc, T> {
+    scope: IncomingPad<'sc, T>,
 }
 
-impl<'sc> LocalSpawnScopeSpawner<'sc> {
-    pub fn spawn_scoped_local_obj(
-        &self,
-        future: LocalFutureObj<'sc, ()>,
-    ) -> Result<(), SpawnError> {
+impl<'sc, T> Clone for LocalSpawnScopeSpawner<'sc, T> {
+    fn clone(&self) -> Self {
+        Self {
+            scope: self.scope.clone(),
+        }
+    }
+}
+
+impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
+    pub fn spawn_scoped_local_obj(&self, future: LocalFutureObj<'sc, T>) -> Result<(), SpawnError> {
         let mut incoming = self.scope.borrow_mut();
         if let Some(incoming) = incoming.as_mut() {
             incoming.push_back(future);
@@ -178,25 +202,25 @@ impl<'sc> LocalSpawnScopeSpawner<'sc> {
 
     pub fn spawn_local_scoped<Fut>(&self, future: Fut) -> Result<(), SpawnError>
     where
-        Fut: Future<Output = ()> + 'sc,
+        Fut: Future<Output = T> + 'sc,
     {
         self.spawn_scoped_local_obj(LocalFutureObj::new(Box::new(future)))
     }
 }
 
-impl<'sc> ScopedSpawn<'sc> for LocalSpawnScopeSpawner<'sc> {
-    fn spawn_obj_scoped(&self, future: FutureObj<'sc, ()>) -> Result<(), SpawnError> {
+impl<'sc, T> ScopedSpawn<'sc, T> for LocalSpawnScopeSpawner<'sc, T> {
+    fn spawn_obj_scoped(&self, future: FutureObj<'sc, T>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future.into())
     }
 }
 
-impl<'sc> LocalSpawn for LocalSpawnScopeSpawner<'sc> {
+impl<'sc> LocalSpawn for LocalSpawnScopeSpawner<'sc, ()> {
     fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future)
     }
 }
 
-impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc> {
+impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc, ()> {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj_scoped(future)
     }
@@ -204,7 +228,7 @@ impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc> {
 
 #[cfg(test)]
 mod tests {
-    use futures::{channel::oneshot, executor::block_on, task::SpawnExt};
+    use futures::{channel::oneshot, executor::block_on};
 
     use super::LocalSpawnScope;
 
@@ -213,7 +237,7 @@ mod tests {
         struct Test(i32);
         let org = Test(3);
         let value = &org;
-        let mut spawn = LocalSpawnScope::new();
+        let mut spawn = LocalSpawnScope::<usize>::new();
         let (sx, rx) = oneshot::channel::<i32>();
         let spawner = spawn.spawner();
         let inner_spawner = spawn.spawner();
@@ -226,7 +250,7 @@ mod tests {
                     .spawn_local_scoped(async {
                         println!("  inner scope");
                         inner_spawner
-                            .spawn_local_scoped(async { println!("from inner scope") })
+                            .spawn_local_scoped(async { println!("from inner scope"); 1 })
                             .unwrap();
                     })
                     .unwrap();
@@ -236,11 +260,10 @@ mod tests {
                     .spawn_local_scoped(async {
                         println!("  inner scope2");
                         inner_spawner
-                            .spawn_local_scoped(async { println!("from inner scope2") })
+                            .spawn_local_scoped(async { println!("from inner scope2"); 2 })
                             .unwrap();
                     })
                     .unwrap();
-
 
                 println!("outer {}", value.0);
                 inner_spawner
@@ -248,35 +271,38 @@ mod tests {
                         sx.send(10).unwrap();
                         println!("inner {}", value.0);
                         //pending::<()>().await;
+                        3
                     })
                     .unwrap();
 
                 println!("before inner_scope.until.empty()");
                 inner_scope.until_empty().await;
                 println!("after inner_scope.until.empty()");
+                4
             })
             .unwrap();
 
-        let result = block_on(async {
+        let (result, task_results) = block_on(async {
             let (sx2, rx2) = oneshot::channel::<i32>();
             spawner
-                .spawn(async move {
+                .spawn_local_scoped(async move {
                     println!("before rx.await");
                     rx2.await.unwrap();
                     println!("after rx.await");
+                    5
                 })
                 .unwrap();
             println!("before until_stalled");
             spawn.until_stalled().await;
             println!("after until_stalled");
-            spawn.cancel();
             sx2.send(3).unwrap();
             let result = spawn.until(rx).await.unwrap();
             println!("after until");
             spawn.until_empty().await;
-            result
+            (result, spawn.take_results())
         });
 
         println!("{}", result);
+        println!("{:?}", task_results);
     }
 }
