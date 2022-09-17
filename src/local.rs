@@ -19,6 +19,7 @@ use crate::ScopedSpawn;
 
 type IncomingPad<'sc, T> = Rc<RefCell<Option<VecDeque<LocalFutureObj<'sc, T>>>>>;
 
+#[derive(Debug)]
 pub struct LocalSpawnScope<'sc, T = ()> {
     futures: FuturesUnordered<LocalFutureObj<'sc, T>>,
     incoming: IncomingPad<'sc, T>,
@@ -87,7 +88,14 @@ impl<'sc, T> Drop for LocalSpawnScope<'sc, T> {
     }
 }
 
+impl<'sc, T> Default for LocalSpawnScope<'sc, T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pin_project! {
+    #[derive(Debug)]
     pub struct Until<'s, 'sc, T, Fut> {
         scope: &'s mut LocalSpawnScope<'sc, T>,
         #[pin]
@@ -121,6 +129,7 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
     }
 }
 
+#[derive(Debug)]
 pub struct UntilStalled<'s, 'sc, T> {
     scope: &'s mut LocalSpawnScope<'sc, T>,
 }
@@ -151,6 +160,7 @@ impl<'s, 'sc, T> Future for UntilStalled<'s, 'sc, T> {
     }
 }
 
+#[derive(Debug)]
 pub struct UntilEmpty<'s, 'sc, T> {
     scope: &'s mut LocalSpawnScope<'sc, T>,
 }
@@ -177,6 +187,7 @@ impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
     }
 }
 
+#[derive(Debug)]
 pub struct LocalSpawnScopeSpawner<'sc, T> {
     scope: IncomingPad<'sc, T>,
 }
@@ -250,7 +261,10 @@ mod tests {
                     .spawn_local_scoped(async {
                         println!("  inner scope");
                         inner_spawner
-                            .spawn_local_scoped(async { println!("from inner scope"); 1 })
+                            .spawn_local_scoped(async {
+                                println!("from inner scope");
+                                1
+                            })
                             .unwrap();
                     })
                     .unwrap();
@@ -260,7 +274,10 @@ mod tests {
                     .spawn_local_scoped(async {
                         println!("  inner scope2");
                         inner_spawner
-                            .spawn_local_scoped(async { println!("from inner scope2"); 2 })
+                            .spawn_local_scoped(async {
+                                println!("from inner scope2");
+                                2
+                            })
                             .unwrap();
                     })
                     .unwrap();
