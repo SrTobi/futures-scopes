@@ -18,3 +18,5 @@ pub trait ScopedSpawnExt<'a, T>: ScopedSpawn<'a, T> {
         self.spawn_obj_scoped(FutureObj::new(Box::new(future)))
     }
 }
+
+impl<'sc, T, Sp: ?Sized> ScopedSpawnExt<'sc, T> for Sp where Sp: ScopedSpawn<'sc, T> {}

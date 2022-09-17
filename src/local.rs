@@ -3,7 +3,8 @@ use futures::{
     task::{noop_waker, FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError},
     StreamExt,
 };
-use pin_project_lite::pin_project;
+use pin_project::pin_project;
+
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -41,16 +42,16 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
         }
     }
 
+    pub fn cancel(&mut self) {
+        self.drain_incoming();
+        self.incoming.borrow_mut().take();
+    }
+
     pub fn until<Fut: Future>(&mut self, fut: Fut) -> Until<'_, 'sc, T, Fut> {
         Until {
             scope: self,
             future: fut,
         }
-    }
-
-    pub fn cancel(&mut self) {
-        self.drain_incoming();
-        self.incoming.borrow_mut().take();
     }
 
     pub fn until_stalled(&mut self) -> UntilStalled<'_, 'sc, T> {
@@ -94,13 +95,12 @@ impl<'sc, T> Default for LocalSpawnScope<'sc, T> {
     }
 }
 
-pin_project! {
-    #[derive(Debug)]
-    pub struct Until<'s, 'sc, T, Fut> {
-        scope: &'s mut LocalSpawnScope<'sc, T>,
-        #[pin]
-        future: Fut,
-    }
+#[pin_project]
+#[derive(Debug)]
+pub struct Until<'s, 'sc, T, Fut> {
+    scope: &'s mut LocalSpawnScope<'sc, T>,
+    #[pin]
+    future: Fut,
 }
 
 impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
