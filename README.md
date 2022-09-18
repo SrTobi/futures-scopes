@@ -1,7 +1,7 @@
 [![Build](https://github.com/SrTobi/futures-scopes/actions/workflows/rust.yml/badge.svg)](https://github.com/SrTobi/futures-scopes)
 [![Creates.io](https://img.shields.io/crates/v/futures-scopes?style)](https://crates.io/crates/futures-scopes)
 
-# features-scopes
+# futures-scopes
 
 An extension to [futures-rs](https://github.com/rust-lang/futures-rs) that offers scopes.
 Scopes can be used to spawn non-static futures that can reference variables on the stack
