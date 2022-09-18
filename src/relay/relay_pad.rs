@@ -67,7 +67,7 @@ impl<'sc> RelayPad<'sc> {
             match self.receiver.try_recv() {
                 Ok(task) => return Ok(task),
                 Err(_) => {
-                    println!("no tasks {:?}", cx);
+                    //println!("no tasks {:?}", cx);
                     if let Some(cx) = &cx {
                         match self.waker_park.wait(cx.waker().clone(), token) {
                             WaitResult::Ok => return Err(TaskDequeueErr::WaitingForTasks),
@@ -82,7 +82,7 @@ impl<'sc> RelayPad<'sc> {
     }
 
     /*pub fn rescue_future(&self, future: FutureObj<'sc, ()>) {
-        println!("rescued future");
+        //println!("rescued future");
         self.sender.send(future).unwrap();
     }*/
 
@@ -123,14 +123,14 @@ impl<'sc> RelayPad<'sc> {
 
     pub fn until_empty(&self) -> UntilEmpty {
         if 0 == self.current_tasks.load(atomic::Ordering::Relaxed) {
-            println!("return empty UntilEmpty");
+            //println!("return empty UntilEmpty");
             let (sx, rx) = oneshot::channel();
             sx.send(()).unwrap();
             return UntilEmpty { receiver: rx.shared() };
         }
         let mut lock = self.wait_until_empty.lock().unwrap();
         let (rx, _) = lock.get_or_insert_with(|| {
-            println!("new until_empty channel {:?}", self.receiver.len());
+            //println!("new until_empty channel {:?}", self.receiver.len());
             let (sx, rx) = oneshot::channel();
             (rx.shared(), sx)
         });
@@ -138,12 +138,12 @@ impl<'sc> RelayPad<'sc> {
         UntilEmpty { receiver: rx.clone() }
     }
 }
-
+/* 
 impl<'sc> Drop for RelayPad<'sc> {
     fn drop(&mut self) {
         println!("Drop Relay Pad");
     }
-}
+}*/
 
 #[derive(Debug)]
 pub enum TaskDequeueErr {
@@ -182,6 +182,6 @@ impl Future for UntilEmpty {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().receiver.poll(cx).map(|err| println!("err {:?}", err))
+        self.project().receiver.poll(cx).map(|_| ())
     }
 }

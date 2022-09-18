@@ -92,7 +92,7 @@ impl<'sc, Sp> Unpinned<'sc, Sp> {
     where
         Sp: Respawn,
     {
-        println!("spawn another RelayFuture {:?}", self.respawn_counter);
+        //println!("spawn another RelayFuture {:?}", self.respawn_counter);
         self.spawn.respawn(self.pad.clone(), self.respawn_counter.clone(), root);
     }
 }
@@ -125,7 +125,7 @@ impl<'sc, Sp> PinnedDrop for RelayFutureInner<'sc, Sp> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         let unpinned = this.unpinned;
-        println!("drop RelayFuture {:?}", unpinned.respawn_counter);
+        //println!("drop RelayFuture {:?}", unpinned.respawn_counter);
         /*let fut = this.future.take();
         if let Some(fut) = fut {
             unpinned.pad.rescue_future(fut);
@@ -156,7 +156,7 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
                     impl<'l, 'sc, Sp: Respawn> Drop for Bomb<'l, 'sc, Sp> {
                         fn drop(&mut self) {
                             if self.1 {
-                                println!("polling panicked.. respawn to ensure at least one future is present");
+                                //println!("polling panicked.. respawn to ensure at least one future is present");
                                 self.0.respawn(true);
                             }
                         }
