@@ -48,6 +48,8 @@ impl WakerPark {
         if self.has_wakers.load(atomic::Ordering::SeqCst) {
             let mut inner = self.inner.lock().unwrap();
             //println!("wake...");
+
+            #[allow(clippy::significant_drop_in_scrutinee)]
             for waker in inner.drain(..) {
                 waker.wake();
             }

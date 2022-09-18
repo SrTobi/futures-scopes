@@ -6,8 +6,8 @@ use std::thread;
 use futures::channel::mpsc;
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::{SinkExt, StreamExt};
-use futures_scoped::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
-use futures_scoped::{new_relay_scope, ScopedSpawnExt, SpawnScope};
+use futures_scopes::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
+use futures_scopes::{new_relay_scope, ScopedSpawnExt, SpawnScope};
 
 #[test]
 fn test_mutate_outer() {

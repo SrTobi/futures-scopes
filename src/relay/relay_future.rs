@@ -10,14 +10,14 @@ use pin_project::{pin_project, pinned_drop};
 use super::relay_pad::{RelayPad, TaskDequeueErr};
 
 trait Respawn {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool);
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool);
 }
 
 #[derive(Clone)]
 pub struct GlobalRespawn<Sp>(Sp);
 
 impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
         let fut = unsafe { RelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
         self.0.spawn(fut).ok();
     }
@@ -27,7 +27,7 @@ impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
 pub struct LocalRespawn<Sp>(Sp);
 
 impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
         let fut = unsafe { RelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
         self.0.spawn_local(fut).ok();
     }
@@ -60,7 +60,7 @@ impl RespawnCounter {
     fn start_polling(&self) -> RespawnCounterPollingGuard<'_> {
         let non_working = self.non_working.fetch_sub(1, atomic::Ordering::Relaxed) - 1;
         let should_respawn = non_working < 5;
-        return RespawnCounterPollingGuard(self, should_respawn);
+        RespawnCounterPollingGuard(self, should_respawn)
     }
 }
 
@@ -122,6 +122,7 @@ impl<'sc, Sp> RelayFutureInner<'sc, Sp> {
 
 #[pinned_drop]
 impl<'sc, Sp> PinnedDrop for RelayFutureInner<'sc, Sp> {
+    #[allow(clippy::needless_lifetimes)]
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         let unpinned = this.unpinned;
@@ -162,7 +163,7 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
                         }
                     }
 
-                    let mut bomb = Bomb(&unpinned, unpinned.root);
+                    let mut bomb = Bomb(unpinned, unpinned.root);
                     let poll_result = fut.poll(cx);
                     bomb.1 = false;
 
@@ -225,7 +226,7 @@ impl<Sp> RelayFuture<Sp> {
 }
 
 impl<Sp> RelayFuture<GlobalRespawn<Sp>> {
-    pub unsafe fn new_global<'sc>(pad: Arc<RelayPad<'sc>>, spawn: Sp) -> Self
+    pub unsafe fn new_global(pad: Arc<RelayPad<'_>>, spawn: Sp) -> Self
     where
         Sp: Spawn + Clone + Send + 'static,
     {
@@ -234,7 +235,7 @@ impl<Sp> RelayFuture<GlobalRespawn<Sp>> {
 }
 
 impl<Sp> RelayFuture<LocalRespawn<Sp>> {
-    pub unsafe fn new_local<'sc>(pad: Arc<RelayPad<'sc>>, spawn: Sp) -> Self
+    pub unsafe fn new_local(pad: Arc<RelayPad<'_>>, spawn: Sp) -> Self
     where
         Sp: LocalSpawn + Clone + 'static,
     {

@@ -13,6 +13,7 @@ use pin_project::pin_project;
 use super::waker_park::{WaitResult, WakerPark};
 
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 pub struct RelayPad<'sc> {
     sender: crossbeam_channel::Sender<FutureObj<'sc, ()>>,
     receiver: crossbeam_channel::Receiver<FutureObj<'sc, ()>>,
@@ -96,11 +97,9 @@ impl<'sc> RelayPad<'sc> {
     }
 
     fn end_future_polling(&self, poll_again: bool) {
-        if !poll_again {
-            if 1 == self.current_tasks.fetch_sub(1, atomic::Ordering::Relaxed) {
-                if let Some((_, sx)) = self.wait_until_empty.lock().unwrap().deref_mut().take() {
-                    sx.send(()).unwrap();
-                }
+        if !poll_again && 1 == self.current_tasks.fetch_sub(1, atomic::Ordering::Relaxed) {
+            if let Some((_, sx)) = self.wait_until_empty.lock().unwrap().deref_mut().take() {
+                sx.send(()).unwrap();
             }
         }
         if 1 == self.current_polls.fetch_sub(1, atomic::Ordering::SeqCst) {
@@ -138,7 +137,7 @@ impl<'sc> RelayPad<'sc> {
         UntilEmpty { receiver: rx.clone() }
     }
 }
-/* 
+/*
 impl<'sc> Drop for RelayPad<'sc> {
     fn drop(&mut self) {
         println!("Drop Relay Pad");

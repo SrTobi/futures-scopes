@@ -40,6 +40,15 @@ macro_rules! new_relay_scope {
 }
 
 impl<'sc> RelayScope<'sc> {
+    /// Creates a new RelayScope
+    ///
+    /// Spawned futures can reference everything covered by 'sc.
+    ///
+    /// # Safety
+    /// It is of utmost important that the created scope is dropped at the end of 'sc.
+    /// Especially [`std::mem::forget`] should not be used on this type.
+    /// Failing to drop this correctly can lead to spawned futures having references
+    /// into undefined memory (namely when they reference something on the stack that is already popped).
     pub unsafe fn unchecked_new() -> Self {
         Self {
             pad: Arc::new(RelayPad::new()),
