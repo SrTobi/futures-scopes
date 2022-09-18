@@ -1,11 +1,15 @@
 [package]
+authors = ["SrTobi <code.databyte@gmail.com>"]
+description = "Runtime agnostic, nestable, scopes for spawning non-static futures."
+edition = "2021"
+keywords = ["async", "futures"]
+license = "MIT"
 name = "futures-scopes"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 crossbeam-channel = "0.5.6"
-futures = { version = "0.3.24", features = ["thread-pool"] }
+futures = {version = "0.3.24", features = ["thread-pool"]}
 pin-project = "1.0.12"
