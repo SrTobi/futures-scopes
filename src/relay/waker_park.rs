@@ -35,6 +35,7 @@ impl WakerPark {
     }
 
     pub fn wait(&self, waker: Waker, token: WaitToken) -> WaitResult {
+        println!("waiting...");
         let mut inner = self.inner.lock().unwrap();
 
         self.has_wakers.store(true, atomic::Ordering::SeqCst);
@@ -50,6 +51,7 @@ impl WakerPark {
         self.token.fetch_add(1, atomic::Ordering::SeqCst);
         if self.has_wakers.load(atomic::Ordering::SeqCst) {
             let mut inner = self.inner.lock().unwrap();
+            println!("wake...");
             for waker in inner.drain(..) {
                 waker.wake();
             }

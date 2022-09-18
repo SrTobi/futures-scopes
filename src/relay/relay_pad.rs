@@ -1,13 +1,20 @@
 use std::{
-    ops::Not,
+    ops::{DerefMut, Not},
+    pin::Pin,
     sync::{
         atomic::{self, AtomicBool, AtomicUsize},
         Condvar, Mutex,
     },
-    task::Context,
+    task::{Context, Poll},
 };
 
-use futures::task::{FutureObj, SpawnError};
+use futures::{
+    channel::oneshot,
+    future::Shared,
+    task::{FutureObj, SpawnError},
+    Future, FutureExt,
+};
+use pin_project::pin_project;
 
 use super::waker_park::{WaitResult, WakerPark};
 
@@ -17,9 +24,11 @@ pub struct RelayPad<'sc> {
     receiver: crossbeam_channel::Receiver<FutureObj<'sc, ()>>,
     waker_park: WakerPark,
     current_polls: AtomicUsize,
+    current_tasks: AtomicUsize,
     destroy: AtomicBool,
     destroy_waiting: Condvar,
     destroy_mutex: Mutex<()>,
+    wait_until_empty: Mutex<Option<(Shared<oneshot::Receiver<()>>, oneshot::Sender<()>)>>,
 }
 
 impl<'sc> RelayPad<'sc> {
@@ -30,9 +39,11 @@ impl<'sc> RelayPad<'sc> {
             receiver,
             waker_park: WakerPark::new(),
             current_polls: AtomicUsize::new(0),
+            current_tasks: AtomicUsize::new(0),
             destroy: AtomicBool::new(false),
             destroy_waiting: Condvar::new(),
             destroy_mutex: Mutex::new(()),
+            wait_until_empty: Mutex::new(None),
         }
     }
 
@@ -47,6 +58,7 @@ impl<'sc> RelayPad<'sc> {
             .map_err(|_err| SpawnError::shutdown());
 
         if result.is_ok() {
+            self.current_tasks.fetch_add(1, atomic::Ordering::Relaxed);
             self.waker_park.wake();
         }
 
@@ -67,6 +79,7 @@ impl<'sc> RelayPad<'sc> {
             match self.receiver.try_recv() {
                 Ok(task) => return Ok(task),
                 Err(_) => {
+                    println!("no tasks {:?}", cx);
                     if let Some(cx) = &cx {
                         match self.waker_park.wait(cx.waker().clone(), token) {
                             WaitResult::Ok => return Err(TaskDequeueErr::WaitingForTasks),
@@ -87,16 +100,27 @@ impl<'sc> RelayPad<'sc> {
 
     pub fn start_future_polling(&self) -> Option<FuturePollingGuard<'_, 'sc>> {
         self.current_polls.fetch_add(1, atomic::Ordering::SeqCst);
-        let guard = FuturePollingGuard { pad: self };
+        let guard = FuturePollingGuard {
+            pad: self,
+            poll_again: false,
+        };
         self.destroy
             .load(atomic::Ordering::SeqCst)
             .not()
             .then_some(guard)
     }
 
-    fn end_future_polling(&self) {
+    fn end_future_polling(&self, poll_again: bool) {
+        if !poll_again {
+            if 1 == self.current_tasks.fetch_sub(1, atomic::Ordering::Relaxed) {
+                if let Some((_, sx)) = self.wait_until_empty.lock().unwrap().deref_mut().take() {
+                    sx.send(()).unwrap();
+                }
+            }
+        }
         if 1 == self.current_polls.fetch_sub(1, atomic::Ordering::SeqCst) {
             // last future polling has ended
+
             let _guard = self.destroy_mutex.lock().unwrap();
             self.destroy_waiting.notify_all();
         }
@@ -109,6 +133,27 @@ impl<'sc> RelayPad<'sc> {
         let mut guard = self.destroy_mutex.lock().unwrap();
         while 0 != self.current_polls.load(atomic::Ordering::SeqCst) {
             guard = self.destroy_waiting.wait(guard).unwrap();
+        }
+    }
+
+    pub fn until_empty(&self) -> UntilEmpty {
+        if 0 == self.current_tasks.load(atomic::Ordering::Relaxed) {
+            println!("return empty UntilEmpty");
+            let (sx, rx) = oneshot::channel();
+            sx.send(()).unwrap();
+            return UntilEmpty {
+                receiver: rx.shared(),
+            };
+        }
+        let mut lock = self.wait_until_empty.lock().unwrap();
+        let (rx, _) = lock.get_or_insert_with(|| {
+            println!("new until_emtpy channel {:?}", self.receiver.len());
+            let (sx, rx) = oneshot::channel();
+            (rx.shared(), sx)
+        });
+
+        UntilEmpty {
+            receiver: rx.clone(),
         }
     }
 }
@@ -131,10 +176,31 @@ pub enum TaskDequeueErr {
 #[derive(Debug)]
 pub struct FuturePollingGuard<'l, 'sc> {
     pad: &'l RelayPad<'sc>,
+    poll_again: bool,
+}
+
+impl<'l, 'sc> FuturePollingGuard<'l, 'sc> {
+    pub fn will_poll_again(&mut self) {
+        self.poll_again = true;
+    }
 }
 
 impl<'l, 'sc> Drop for FuturePollingGuard<'l, 'sc> {
     fn drop(&mut self) {
-        self.pad.end_future_polling();
+        self.pad.end_future_polling(self.poll_again);
+    }
+}
+
+#[pin_project]
+pub struct UntilEmpty {
+    #[pin]
+    receiver: Shared<oneshot::Receiver<()>>,
+}
+
+impl Future for UntilEmpty {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().receiver.poll(cx).map(|err| println!("err {:?}", err))
     }
 }

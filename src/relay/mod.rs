@@ -3,13 +3,14 @@ use std::sync::Arc;
 mod relay_future;
 mod relay_pad;
 mod waker_park;
-use relay_pad::*;
+
+pub use relay_pad::UntilEmpty;
 
 use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError, SpawnExt};
 
 use crate::{ScopedSpawn, SpawnScope};
 
-use self::relay_future::RelayFuture;
+use self::{relay_future::RelayFuture, relay_pad::RelayPad};
 
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
     fn spawn_scope_local<'sc>(&self, scope: &RelayScope<'sc>) {
@@ -54,6 +55,10 @@ impl<'sc> RelayScope<'sc> {
     pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) {
         let fut = unsafe { RelayFuture::new_local(self.pad.clone(), spawn.clone()) };
         spawn.spawn_local(fut).unwrap();
+    }
+
+    pub fn until_empty(&self) -> UntilEmpty {
+        self.pad.until_empty()
     }
 }
 
@@ -105,7 +110,7 @@ mod tests {
 
     use futures::{
         channel::oneshot,
-        executor::{LocalPool, ThreadPool},
+        executor::{block_on, LocalPool, ThreadPool},
     };
 
     use crate::{
@@ -152,22 +157,38 @@ mod tests {
     fn test_on_thread_pool() {
         let pool = ThreadPool::new().unwrap();
 
-        {
+        let until_empty = {
             let scope = new_relay_scope!();
 
             pool.spawn_scope(scope);
 
             let spawner = scope.spawner();
 
-            for i in 0..500 {
+            for i in 0..1000 {
                 spawner
                     .spawn_scoped(async move {
                         println!("process {} on {:?}", i, thread::current().id());
                     })
                     .unwrap();
             }
-            thread::sleep(Duration::from_secs(1));
-        }
+
+            let until_empty = scope.until_empty();
+
+            block_on(scope.until_empty());
+            println!("done... do some more");
+
+            for _ in 0..50 {
+                spawner
+                    .spawn_scoped(async {
+                        println!("ahahaha");
+                    })
+                    .unwrap();
+            }
+
+            until_empty
+        };
         println!("scope destroyed");
+        thread::sleep(Duration::from_millis(300));
+        block_on(until_empty);
     }
 }

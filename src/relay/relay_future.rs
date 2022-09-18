@@ -16,15 +16,15 @@ use super::relay_pad::{RelayPad, TaskDequeueErr};
 use pin_project::{pin_project, pinned_drop};
 
 trait Respawn {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>);
+    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool);
 }
 
 #[derive(Clone)]
 pub struct GlobalRespawn<Sp>(Sp);
 
 impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>) {
-        let fut = unsafe { RelayFuture::new_full(pad, self.clone(), false, respawn_counter) };
+    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
+        let fut = unsafe { RelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
         self.0.spawn(fut).ok();
     }
 }
@@ -33,8 +33,8 @@ impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
 pub struct LocalRespawn<Sp>(Sp);
 
 impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
-    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>) {
-        let fut = unsafe { RelayFuture::new_full(pad, self.clone(), false, respawn_counter) };
+    fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
+        let fut = unsafe { RelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
         self.0.spawn_local(fut).ok();
     }
 }
@@ -42,21 +42,25 @@ impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
 #[derive(Debug)]
 struct RespawnCounter {
     non_working: AtomicUsize,
+    all: AtomicUsize,
 }
 
 impl RespawnCounter {
     fn new() -> Self {
         Self {
             non_working: AtomicUsize::new(0),
+            all: AtomicUsize::new(0),
         }
     }
 
     fn subscribe(&self) {
         self.non_working.fetch_add(1, atomic::Ordering::Relaxed);
+        self.all.fetch_add(1, atomic::Ordering::Relaxed);
     }
 
     fn unsubscribe(&self) {
         self.non_working.fetch_sub(1, atomic::Ordering::Relaxed);
+        self.all.fetch_sub(1, atomic::Ordering::Relaxed);
     }
 
     fn start_polling(&self) -> RespawnCounterPollingGuard<'_> {
@@ -90,13 +94,13 @@ struct Unpinned<'sc, Sp> {
 }
 
 impl<'sc, Sp> Unpinned<'sc, Sp> {
-    fn respawn(&self)
+    fn respawn(&self, root: bool)
     where
         Sp: Respawn,
     {
-        println!("spawn another RelayFuture");
+        println!("spawn another RelayFuture {:?}", self.respawn_counter);
         self.spawn
-            .respawn(self.pad.clone(), self.respawn_counter.clone());
+            .respawn(self.pad.clone(), self.respawn_counter.clone(), root);
     }
 }
 
@@ -131,8 +135,8 @@ impl<'sc, Sp> RelayFutureInner<'sc, Sp> {
 #[pinned_drop]
 impl<'sc, Sp> PinnedDrop for RelayFutureInner<'sc, Sp> {
     fn drop(self: Pin<&mut Self>) {
-        println!("drop RelayFuture");
         let mut this = self.project();
+        println!("drop RelayFuture {:?}", this.unpinned.respawn_counter);
         this.unpinned.respawn_counter.unsubscribe();
         let fut = this.future.take();
         if let Some(fut) = fut {
@@ -152,24 +156,25 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
         loop {
             if let Some(fut) = this.future.as_mut().as_pin_mut() {
                 //println!("RelayFutureInner::poll start polling future");
-                if let Some(_guard) = unpinned.pad.start_future_polling() {
+                if let Some(mut poll_guard) = unpinned.pad.start_future_polling() {
                     //println!("RelayFutureInner::poll got guard. polling inner");
                     let _respawn_guard = unpinned.respawn_counter.start_polling();
                     if _respawn_guard.should_respawn() {
-                        unpinned.respawn();
+                        unpinned.respawn(false);
                     }
                     match fut.poll(cx) {
                         Poll::Ready(()) => {
                             this.future.take();
                             finished_tasks += 1;
                             if finished_tasks > 5 {
-                                unpinned.respawn();
+                                unpinned.respawn(unpinned.root);
                                 return Poll::Ready(());
                             }
                             continue;
                         }
                         Poll::Pending => {
-                            unpinned.respawn();
+                            poll_guard.will_poll_again();
+                            unpinned.respawn(false);
                             return Poll::Pending;
                         }
                     }
