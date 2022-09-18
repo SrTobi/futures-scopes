@@ -1,19 +1,13 @@
-use std::{
-    pin::Pin,
-    sync::{
-        atomic::{self, AtomicUsize},
-        Arc,
-    },
-    task::{Context, Poll},
-};
+use std::pin::Pin;
+use std::sync::atomic::{self, AtomicUsize};
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures::{
-    task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnExt},
-    Future,
-};
+use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnExt};
+use futures::Future;
+use pin_project::{pin_project, pinned_drop};
 
 use super::relay_pad::{RelayPad, TaskDequeueErr};
-use pin_project::{pin_project, pinned_drop};
 
 trait Respawn {
     fn respawn<'sc>(&self, pad: Arc<RelayPad<'sc>>, respawn_counter: Arc<RespawnCounter>, root: bool);
@@ -99,8 +93,7 @@ impl<'sc, Sp> Unpinned<'sc, Sp> {
         Sp: Respawn,
     {
         println!("spawn another RelayFuture {:?}", self.respawn_counter);
-        self.spawn
-            .respawn(self.pad.clone(), self.respawn_counter.clone(), root);
+        self.spawn.respawn(self.pad.clone(), self.respawn_counter.clone(), root);
     }
 }
 
@@ -113,12 +106,7 @@ struct RelayFutureInner<'sc, Sp> {
 }
 
 impl<'sc, Sp> RelayFutureInner<'sc, Sp> {
-    fn new(
-        pad: Arc<RelayPad<'sc>>,
-        spawn: Sp,
-        root: bool,
-        respawn_counter: Arc<RespawnCounter>,
-    ) -> Self {
+    fn new(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, respawn_counter: Arc<RespawnCounter>) -> Self {
         respawn_counter.subscribe();
         Self {
             future: None,
@@ -192,7 +180,7 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
                     Err(TaskDequeueErr::Destroy) => return Poll::Ready(()),
                 };
 
-                //println!("RelayFutureInner::poll aquired new future");
+                //println!("RelayFutureInner::poll acquire new future");
             }
         }
     }
@@ -224,12 +212,7 @@ impl<Sp> RelayFuture<GlobalRespawn<Sp>> {
     where
         Sp: Spawn + Clone + Send + 'static,
     {
-        Self::new_full(
-            pad,
-            GlobalRespawn(spawn),
-            true,
-            Arc::new(RespawnCounter::new()),
-        )
+        Self::new_full(pad, GlobalRespawn(spawn), true, Arc::new(RespawnCounter::new()))
     }
 }
 
@@ -238,12 +221,7 @@ impl<Sp> RelayFuture<LocalRespawn<Sp>> {
     where
         Sp: LocalSpawn + Clone + 'static,
     {
-        Self::new_full(
-            pad,
-            LocalRespawn(spawn),
-            true,
-            Arc::new(RespawnCounter::new()),
-        )
+        Self::new_full(pad, LocalRespawn(spawn), true, Arc::new(RespawnCounter::new()))
     }
 }
 

@@ -1,19 +1,13 @@
-use std::{
-    ops::{DerefMut, Not},
-    pin::Pin,
-    sync::{
-        atomic::{self, AtomicBool, AtomicUsize},
-        Condvar, Mutex,
-    },
-    task::{Context, Poll},
-};
+use std::ops::{DerefMut, Not};
+use std::pin::Pin;
+use std::sync::atomic::{self, AtomicBool, AtomicUsize};
+use std::sync::{Condvar, Mutex};
+use std::task::{Context, Poll};
 
-use futures::{
-    channel::oneshot,
-    future::Shared,
-    task::{FutureObj, SpawnError},
-    Future, FutureExt,
-};
+use futures::channel::oneshot;
+use futures::future::Shared;
+use futures::task::{FutureObj, SpawnError};
+use futures::{Future, FutureExt};
 use pin_project::pin_project;
 
 use super::waker_park::{WaitResult, WakerPark};
@@ -52,10 +46,7 @@ impl<'sc> RelayPad<'sc> {
             return Err(SpawnError::shutdown());
         }
 
-        let result = self
-            .sender
-            .send(task)
-            .map_err(|_err| SpawnError::shutdown());
+        let result = self.sender.send(task).map_err(|_err| SpawnError::shutdown());
 
         if result.is_ok() {
             self.current_tasks.fetch_add(1, atomic::Ordering::Relaxed);
@@ -65,10 +56,7 @@ impl<'sc> RelayPad<'sc> {
         result
     }
 
-    pub fn dequeue_task(
-        &self,
-        cx: Option<&mut Context<'_>>,
-    ) -> Result<FutureObj<'sc, ()>, TaskDequeueErr> {
+    pub fn dequeue_task(&self, cx: Option<&mut Context<'_>>) -> Result<FutureObj<'sc, ()>, TaskDequeueErr> {
         loop {
             let token = self.waker_park.token();
 
@@ -104,10 +92,7 @@ impl<'sc> RelayPad<'sc> {
             pad: self,
             poll_again: false,
         };
-        self.destroy
-            .load(atomic::Ordering::SeqCst)
-            .not()
-            .then_some(guard)
+        self.destroy.load(atomic::Ordering::SeqCst).not().then_some(guard)
     }
 
     fn end_future_polling(&self, poll_again: bool) {
@@ -141,20 +126,16 @@ impl<'sc> RelayPad<'sc> {
             println!("return empty UntilEmpty");
             let (sx, rx) = oneshot::channel();
             sx.send(()).unwrap();
-            return UntilEmpty {
-                receiver: rx.shared(),
-            };
+            return UntilEmpty { receiver: rx.shared() };
         }
         let mut lock = self.wait_until_empty.lock().unwrap();
         let (rx, _) = lock.get_or_insert_with(|| {
-            println!("new until_emtpy channel {:?}", self.receiver.len());
+            println!("new until_empty channel {:?}", self.receiver.len());
             let (sx, rx) = oneshot::channel();
             (rx.shared(), sx)
         });
 
-        UntilEmpty {
-            receiver: rx.clone(),
-        }
+        UntilEmpty { receiver: rx.clone() }
     }
 }
 

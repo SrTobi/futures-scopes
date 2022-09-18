@@ -4,13 +4,12 @@ mod relay_future;
 mod relay_pad;
 mod waker_park;
 
+use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError, SpawnExt};
 pub use relay_pad::UntilEmpty;
 
-use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError, SpawnExt};
-
+use self::relay_future::RelayFuture;
+use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
-
-use self::{relay_future::RelayFuture, relay_pad::RelayPad};
 
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
     fn spawn_scope_local<'sc>(&self, scope: &RelayScope<'sc>) {
@@ -106,19 +105,15 @@ impl<'sc> Spawn for RelayScopeSpawner<'sc> {
 #[cfg(test)]
 mod tests {
 
-    use std::{thread, time::Duration};
+    use std::thread;
+    use std::time::Duration;
 
-    use futures::{
-        channel::oneshot,
-        executor::{block_on, LocalPool, ThreadPool},
-    };
-
-    use crate::{
-        relay::{RelayScopeLocalSpawning, RelayScopeSpawning},
-        ScopedSpawnExt, SpawnScope,
-    };
+    use futures::channel::oneshot;
+    use futures::executor::{block_on, LocalPool, ThreadPool};
 
     use super::RelayScope;
+    use crate::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
+    use crate::{ScopedSpawnExt, SpawnScope};
 
     #[test]
     fn test_relay_scope() {
@@ -180,7 +175,7 @@ mod tests {
             for _ in 0..50 {
                 spawner
                     .spawn_scoped(async {
-                        println!("ahahaha");
+                        println!("in second scope");
                     })
                     .unwrap();
             }

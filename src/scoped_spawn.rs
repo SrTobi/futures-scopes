@@ -1,5 +1,6 @@
-use futures::task::{FutureObj, SpawnError};
 use std::future::Future;
+
+use futures::task::{FutureObj, SpawnError};
 
 pub trait ScopedSpawn<'a, T> {
     fn spawn_obj_scoped(&self, future: FutureObj<'a, T>) -> Result<(), SpawnError>;

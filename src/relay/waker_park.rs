@@ -1,10 +1,6 @@
-use std::{
-    sync::{
-        atomic::{self, AtomicBool, AtomicUsize},
-        Mutex,
-    },
-    task::Waker,
-};
+use std::sync::atomic::{self, AtomicBool, AtomicUsize};
+use std::sync::Mutex;
+use std::task::Waker;
 
 #[derive(Debug)]
 pub struct WaitToken(usize);

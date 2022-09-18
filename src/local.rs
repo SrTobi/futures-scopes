@@ -1,20 +1,16 @@
-use futures::{
-    stream::FuturesUnordered,
-    task::{noop_waker, FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError},
-    StreamExt,
-};
-use pin_project::pin_project;
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::future::Future;
+use std::mem;
+use std::ops::DerefMut;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll};
 
-use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    future::Future,
-    mem,
-    ops::DerefMut,
-    pin::Pin,
-    rc::Rc,
-    task::{Context, Poll},
-};
+use futures::stream::FuturesUnordered;
+use futures::task::{noop_waker, FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError};
+use futures::StreamExt;
+use pin_project::pin_project;
 
 use crate::ScopedSpawn;
 
@@ -239,7 +235,8 @@ impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc, ()> {
 
 #[cfg(test)]
 mod tests {
-    use futures::{channel::oneshot, executor::block_on};
+    use futures::channel::oneshot;
+    use futures::executor::block_on;
 
     use super::LocalSpawnScope;
 

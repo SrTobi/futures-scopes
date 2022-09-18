@@ -1,3 +1,9 @@
 {
     "editor.formatOnSave": true,
+    "cSpell.words": [
+        "Condvar",
+        "Deque",
+        "oneshot",
+        "respawn"
+    ],
 }
