@@ -233,6 +233,7 @@ impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc, ()> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use futures::channel::oneshot;
@@ -320,3 +321,4 @@ mod tests {
         println!("{:?}", task_results);
     }
 }
+*/

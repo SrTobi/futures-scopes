@@ -35,7 +35,7 @@ pub struct RelayScope<'sc> {
 #[macro_export]
 macro_rules! new_relay_scope {
     () => {{
-        &mut unsafe { RelayScope::unchecked_new() }
+        &unsafe { $crate::relay::RelayScope::unchecked_new() }
     }};
 }
 
@@ -102,52 +102,55 @@ impl<'sc> Spawn for RelayScopeSpawner<'sc> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
+    use std::future::pending;
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
     use futures::channel::oneshot;
-    use futures::executor::{block_on, LocalPool, ThreadPool};
+    use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 
     use super::RelayScope;
     use crate::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
     use crate::{ScopedSpawnExt, SpawnScope};
 
+
     #[test]
-    fn test_relay_scope() {
-        #[derive(Debug)]
-        struct Unmovable(i32);
-        let unmovable = Unmovable(100);
-        let mut pool = LocalPool::new();
-        let (sx, rx) = oneshot::channel();
-        {
-            let relay_scope = new_relay_scope!();
-            pool.spawner().spawn_scope_local(&relay_scope);
-            let spawner = relay_scope.spawner();
+        fn test_relay_scope() {
+            #[derive(Debug)]
+            struct Unmovable(i32);
+            let unmovable = Unmovable(100);
+            let mut pool = LocalPool::new();
+            let (sx, rx) = oneshot::channel();
+            {
+                let relay_scope = new_relay_scope!();
+                pool.spawner().spawn_scope_local(&relay_scope);
+                let spawner = relay_scope.spawner();
 
-            spawner
-                .spawn_scoped(async {
-                    println!("unmovable: {:?}", unmovable);
-                })
-                .unwrap();
+                spawner
+                    .spawn_scoped(async {
+                        println!("unmovable: {:?}", unmovable);
+                    })
+                    .unwrap();
 
-            spawner
-                .spawn_scoped(async {
-                    println!("never end {:?}", unmovable);
-                    rx.await.unwrap();
-                    println!("received data {:?}", unmovable);
-                })
-                .unwrap();
+                spawner
+                    .spawn_scoped(async {
+                        println!("never end {:?}", unmovable);
+                        rx.await.unwrap();
+                        println!("received data {:?}", unmovable);
+                    })
+                    .unwrap();
 
-            pool.run_until_stalled();
+                pool.run_until_stalled();
+            }
+            println!("pool.run");
+            sx.send(()).ok();
+            pool.run();
         }
-        println!("pool.run");
-        sx.send(()).ok();
-        pool.run();
-    }
-
     #[test]
     fn test_on_thread_pool() {
         let pool = ThreadPool::new().unwrap();
@@ -163,6 +166,7 @@ mod tests {
                 spawner
                     .spawn_scoped(async move {
                         println!("process {} on {:?}", i, thread::current().id());
+                        //panic!();
                     })
                     .unwrap();
             }
@@ -187,3 +191,5 @@ mod tests {
         block_on(until_empty);
     }
 }
+
+*/

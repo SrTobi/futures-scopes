@@ -123,13 +123,14 @@ impl<'sc, Sp> RelayFutureInner<'sc, Sp> {
 #[pinned_drop]
 impl<'sc, Sp> PinnedDrop for RelayFutureInner<'sc, Sp> {
     fn drop(self: Pin<&mut Self>) {
-        let mut this = self.project();
-        println!("drop RelayFuture {:?}", this.unpinned.respawn_counter);
-        this.unpinned.respawn_counter.unsubscribe();
-        let fut = this.future.take();
+        let this = self.project();
+        let unpinned = this.unpinned;
+        println!("drop RelayFuture {:?}", unpinned.respawn_counter);
+        /*let fut = this.future.take();
         if let Some(fut) = fut {
-            this.unpinned.pad.rescue_future(fut);
-        }
+            unpinned.pad.rescue_future(fut);
+        }*/
+        unpinned.respawn_counter.unsubscribe();
     }
 }
 
@@ -150,7 +151,22 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
                     if _respawn_guard.should_respawn() {
                         unpinned.respawn(false);
                     }
-                    match fut.poll(cx) {
+
+                    struct Bomb<'l, 'sc, Sp: Respawn>(&'l Unpinned<'sc, Sp>, bool);
+                    impl<'l, 'sc, Sp: Respawn> Drop for Bomb<'l, 'sc, Sp> {
+                        fn drop(&mut self) {
+                            if self.1 {
+                                println!("polling panicked.. respawn to ensure at least one future is present");
+                                self.0.respawn(true);
+                            }
+                        }
+                    }
+
+                    let mut bomb = Bomb(&unpinned, unpinned.root);
+                    let poll_result = fut.poll(cx);
+                    bomb.1 = false;
+
+                    match poll_result {
                         Poll::Ready(()) => {
                             this.future.take();
                             finished_tasks += 1;
@@ -167,8 +183,9 @@ impl<'sc, Sp: Respawn> Future for RelayFutureInner<'sc, Sp> {
                         }
                     }
                 } else {
-                    let fut = this.future.take();
-                    unpinned.pad.rescue_future(fut.unwrap());
+                    // destroying is ongoing...
+                    let _fut = this.future.take();
+                    //unpinned.pad.rescue_future(fut.unwrap());
                     return Poll::Ready(());
                 }
             } else {

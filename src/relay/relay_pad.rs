@@ -81,10 +81,10 @@ impl<'sc> RelayPad<'sc> {
         }
     }
 
-    pub fn rescue_future(&self, future: FutureObj<'sc, ()>) {
+    /*pub fn rescue_future(&self, future: FutureObj<'sc, ()>) {
         println!("rescued future");
         self.sender.send(future).unwrap();
-    }
+    }*/
 
     pub fn start_future_polling(&self) -> Option<FuturePollingGuard<'_, 'sc>> {
         self.current_polls.fetch_add(1, atomic::Ordering::SeqCst);
