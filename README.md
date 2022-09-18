@@ -1,4 +1,5 @@
 [![Build](https://github.com/SrTobi/futures-scopes/actions/workflows/rust.yml/badge.svg)](https://github.com/SrTobi/futures-scopes)
+[![Creates.io](https://img.shields.io/crates/v/futures-scopes?style)](https://crates.io/crates/futures-scopes)
 
 # features-scopes
 
