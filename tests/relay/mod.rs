@@ -8,6 +8,7 @@ use futures::channel::mpsc;
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
+use futures_scopes::ScopedSpawn;
 use futures_scopes::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
 use futures_scopes::{new_relay_scope, ScopedSpawnExt, SpawnScope};
 
@@ -78,6 +79,20 @@ fn test_futures_are_dropped() {
         }).unwrap();
     }
     assert_eq!(1, Arc::strong_count(&counter));
+}
+
+
+#[test]
+fn test_spawner_status() {
+    let spawner = {
+        let scope = new_relay_scope!();
+        let spawner = scope.spawner();
+        assert!(spawner.status().is_ok());
+        assert!(spawner.status_scoped().is_ok());
+        spawner
+    };
+    assert!(spawner.status().is_err());
+    assert!(spawner.status_scoped().is_err());
 }
 
 #[test]

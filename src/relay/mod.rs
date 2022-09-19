@@ -105,11 +105,23 @@ impl<'sc> ScopedSpawn<'sc, ()> for RelayScopeSpawner<'sc> {
     fn spawn_obj_scoped(&self, future: FutureObj<'sc, ()>) -> Result<(), SpawnError> {
         self.sender.enqueue_task(future)
     }
+
+    fn status_scoped(&self) -> Result<(), SpawnError> {
+        if self.sender.is_destroyed() {
+            Err(SpawnError::shutdown())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl<'sc> Spawn for RelayScopeSpawner<'sc> {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj_scoped(future)
+    }
+
+    fn status(&self) -> Result<(), SpawnError> {
+        self.status_scoped()
     }
 }
 

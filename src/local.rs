@@ -203,7 +203,7 @@ impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
             incoming.push_back(future);
             Ok(())
         } else {
-            Result::Err(SpawnError::shutdown())
+            Err(SpawnError::shutdown())
         }
     }
 
@@ -219,17 +219,33 @@ impl<'sc, T> ScopedSpawn<'sc, T> for LocalSpawnScopeSpawner<'sc, T> {
     fn spawn_obj_scoped(&self, future: FutureObj<'sc, T>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future.into())
     }
+
+    fn status_scoped(&self) -> Result<(), SpawnError> {
+        if self.scope.borrow().is_some() {
+            Ok(())
+        } else {
+            Err(SpawnError::shutdown())
+        }
+    }
 }
 
 impl<'sc> LocalSpawn for LocalSpawnScopeSpawner<'sc, ()> {
     fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future)
     }
+
+    fn status_local(&self) -> Result<(), SpawnError> {
+        self.status_scoped()
+    }
 }
 
 impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc, ()> {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj_scoped(future)
+    }
+
+    fn status(&self) -> Result<(), SpawnError> {
+        self.status_scoped()
     }
 }
 

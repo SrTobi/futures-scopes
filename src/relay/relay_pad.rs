@@ -59,7 +59,7 @@ impl<'sc> RelayPad<'sc> {
     }
 
     pub fn enqueue_task(&self, task: FutureObj<'sc, ()>) -> Result<(), SpawnError> {
-        if self.destroyed() {
+        if self.is_destroyed() {
             return Err(SpawnError::shutdown());
         }
 
@@ -77,7 +77,7 @@ impl<'sc> RelayPad<'sc> {
         loop {
             let token = self.waker_park.token();
 
-            if self.destroyed() {
+            if self.is_destroyed() {
                 return Err(TaskDequeueErr::Destroy);
             }
 
@@ -108,7 +108,7 @@ impl<'sc> RelayPad<'sc> {
             pad: self,
             poll_again: false,
         };
-        self.destroyed().not().then_some(guard)
+        self.is_destroyed().not().then_some(guard)
     }
 
     fn end_future_polling(&self, poll_again: bool) {
@@ -140,7 +140,7 @@ impl<'sc> RelayPad<'sc> {
         self.waker_park.wake();
     }
 
-    fn destroyed(&self) -> bool {
+    pub fn is_destroyed(&self) -> bool {
         self.destroy.load(atomic::Ordering::SeqCst)
     }
 
