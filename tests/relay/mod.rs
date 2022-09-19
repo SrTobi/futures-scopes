@@ -53,7 +53,7 @@ fn test_drop_without_spawner() {
 }
 
 #[test]
-fn test_pending_futures_are_dropped() {
+fn test_futures_are_dropped() {
     let mut pool = LocalPool::new();
     let counter = Arc::new(());
     {
@@ -71,6 +71,11 @@ fn test_pending_futures_are_dropped() {
                 .unwrap();
         }
         pool.run_until_stalled();
+
+        let counter = counter.clone();
+        scope.spawner().spawn_scoped(async move {
+            let _conuter = counter;
+        }).unwrap();
     }
     assert_eq!(1, Arc::strong_count(&counter));
 }
