@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 pub mod local;
 pub mod relay;
 mod scoped_spawn;
