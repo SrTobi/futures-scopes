@@ -126,9 +126,9 @@ impl<'sc> RelayFutureInner<'sc> {
         if !guard.1 {
             // destroy our future
             //println!("Destroy inner");
-            let _ = guard.0.take();
+            let fut = guard.0.take();
             guard.1 = true;
-            pad.unregister_relay_future(self.id);
+            pad.unregister_relay_future(self.id, fut);
         }
         debug_assert!(guard.0.is_none());
     }

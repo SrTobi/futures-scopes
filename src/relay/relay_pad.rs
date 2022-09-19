@@ -52,10 +52,16 @@ impl<'sc> RelayPad<'sc> {
         }
     }
 
-    pub fn unregister_relay_future(&self, id: RelayFutureId) {
+    pub fn unregister_relay_future(&self, id: RelayFutureId, fut: Option<FutureObj<'sc, ()>>) {
         //println!("unregister future {:?}", id);
         let old = self.relays.remove(&id);
         debug_assert!(old.is_some(), "Expected {:?} to have been registered", id);
+
+        if !self.is_destroyed() {
+            if let Some(fut) = fut {
+                self.sender.send(fut).unwrap();
+            }
+        }
     }
 
     pub fn enqueue_task(&self, task: FutureObj<'sc, ()>) -> Result<(), SpawnError> {

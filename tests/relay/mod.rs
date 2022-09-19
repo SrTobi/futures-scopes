@@ -5,12 +5,12 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 use futures::channel::mpsc;
+use futures::channel::oneshot;
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
-use futures_scopes::ScopedSpawn;
 use futures_scopes::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
-use futures_scopes::{new_relay_scope, ScopedSpawnExt, SpawnScope};
+use futures_scopes::{new_relay_scope, ScopedSpawn, ScopedSpawnExt, SpawnScope};
 
 #[test]
 fn test_mutate_outer() {
@@ -74,13 +74,15 @@ fn test_futures_are_dropped() {
         pool.run_until_stalled();
 
         let counter = counter.clone();
-        scope.spawner().spawn_scoped(async move {
-            let _conuter = counter;
-        }).unwrap();
+        scope
+            .spawner()
+            .spawn_scoped(async move {
+                let _conuter = counter;
+            })
+            .unwrap();
     }
     assert_eq!(1, Arc::strong_count(&counter));
 }
-
 
 #[test]
 fn test_spawner_status() {
@@ -168,6 +170,44 @@ fn test_on_local_pool() {
     }
 
     assert_eq!(called.into_inner().unwrap(), 50);
+}
+
+#[test]
+fn test_pool_drop() {
+    let called = &Mutex::new(0);
+    {
+        let scope = new_relay_scope!();
+
+        let (sx, rx) = oneshot::channel();
+
+        scope
+        .spawner()
+        .spawn_scoped(async move {
+            *called.lock().unwrap() += 1;
+            let _ = rx.await;
+            *called.lock().unwrap() += 1;
+        })
+        .unwrap();
+
+        {
+            assert_eq!(*called.lock().unwrap(), 0);
+            let mut pool = LocalPool::new();
+            pool.spawner().spawn_scope_local(scope);
+            let did_run_one = pool.try_run_one();
+            assert!(did_run_one);
+            assert_eq!(*called.lock().unwrap(), 1);
+
+            sx.send(()).unwrap();
+        }
+
+
+        {
+            let mut pool = LocalPool::new();
+            scope.relay_to_local(&pool.spawner());
+            pool.run_until(scope.until_empty());
+            assert_eq!(*called.lock().unwrap(), 2);
+        }
+    }
 }
 
 #[test]
