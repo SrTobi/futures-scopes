@@ -1,3 +1,4 @@
+use std::future::pending;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::*;
 use std::sync::{Arc, Barrier, Mutex};
@@ -43,9 +44,33 @@ fn test_drop_without_spawner() {
                 .spawner()
                 .spawn_scoped(async move {
                     let _counter = counter;
+                    pending::<()>().await
                 })
                 .unwrap();
         }
+    }
+    assert_eq!(1, Arc::strong_count(&counter));
+}
+
+#[test]
+fn test_pending_futures_are_dropped() {
+    let mut pool = LocalPool::new();
+    let counter = Arc::new(());
+    {
+        let scope = new_relay_scope!();
+        pool.spawner().spawn_scope_local(scope);
+
+        for _ in 0..50 {
+            let counter = counter.clone();
+            scope
+                .spawner()
+                .spawn_scoped(async move {
+                    let _counter = counter;
+                    pending::<()>().await;
+                })
+                .unwrap();
+        }
+        pool.run_until_stalled();
     }
     assert_eq!(1, Arc::strong_count(&counter));
 }

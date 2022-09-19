@@ -1,28 +1,29 @@
 use std::ops::{DerefMut, Not};
 use std::pin::Pin;
 use std::sync::atomic::{self, AtomicBool, AtomicUsize};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use dashmap::DashMap;
 use futures::channel::oneshot;
 use futures::future::Shared;
 use futures::task::{FutureObj, SpawnError};
 use futures::{Future, FutureExt};
 use pin_project::pin_project;
 
+use super::relay_future::{RelayFutureId, RelayFutureInner};
 use super::waker_park::{WaitResult, WakerPark};
 
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct RelayPad<'sc> {
+    next_spawn_id: AtomicUsize,
     sender: crossbeam_channel::Sender<FutureObj<'sc, ()>>,
     receiver: crossbeam_channel::Receiver<FutureObj<'sc, ()>>,
+    relays: DashMap<RelayFutureId, Arc<RelayFutureInner<'sc>>>,
     waker_park: WakerPark,
-    current_polls: AtomicUsize,
     current_tasks: AtomicUsize,
     destroy: AtomicBool,
-    destroy_waiting: Condvar,
-    destroy_mutex: Mutex<()>,
     wait_until_empty: Mutex<Option<(Shared<oneshot::Receiver<()>>, oneshot::Sender<()>)>>,
 }
 
@@ -30,20 +31,35 @@ impl<'sc> RelayPad<'sc> {
     pub fn new() -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
         Self {
+            next_spawn_id: AtomicUsize::new(0),
             sender,
             receiver,
+            relays: DashMap::new(),
             waker_park: WakerPark::new(),
-            current_polls: AtomicUsize::new(0),
             current_tasks: AtomicUsize::new(0),
             destroy: AtomicBool::new(false),
-            destroy_waiting: Condvar::new(),
-            destroy_mutex: Mutex::new(()),
             wait_until_empty: Mutex::new(None),
         }
     }
 
+    pub fn next_spawn_id(&self) -> usize {
+        self.next_spawn_id.fetch_add(1, atomic::Ordering::Relaxed)
+    }
+
+    pub fn register_relay_future(&self, relay: Arc<RelayFutureInner<'sc>>) {
+        if !self.destroy.load(atomic::Ordering::SeqCst) {
+            self.relays.insert(relay.id(), relay);
+        }
+    }
+
+    pub fn unregister_relay_future(&self, id: RelayFutureId) {
+        //println!("unregister future {:?}", id);
+        let old = self.relays.remove(&id);
+        debug_assert!(old.is_some(), "Expected {:?} to have been registered", id);
+    }
+
     pub fn enqueue_task(&self, task: FutureObj<'sc, ()>) -> Result<(), SpawnError> {
-        if self.destroy.load(atomic::Ordering::Relaxed) {
+        if self.destroyed() {
             return Err(SpawnError::shutdown());
         }
 
@@ -61,7 +77,7 @@ impl<'sc> RelayPad<'sc> {
         loop {
             let token = self.waker_park.token();
 
-            if self.destroy.load(atomic::Ordering::SeqCst) {
+            if self.destroyed() {
                 return Err(TaskDequeueErr::Destroy);
             }
 
@@ -88,46 +104,54 @@ impl<'sc> RelayPad<'sc> {
     }*/
 
     pub fn start_future_polling(&self) -> Option<FuturePollingGuard<'_, 'sc>> {
-        self.current_polls.fetch_add(1, atomic::Ordering::SeqCst);
         let guard = FuturePollingGuard {
             pad: self,
             poll_again: false,
         };
-        self.destroy.load(atomic::Ordering::SeqCst).not().then_some(guard)
+        self.destroyed().not().then_some(guard)
     }
 
     fn end_future_polling(&self, poll_again: bool) {
-        if !poll_again && 1 == self.current_tasks.fetch_sub(1, atomic::Ordering::Relaxed) {
-            if let Some((_, sx)) = self.wait_until_empty.lock().unwrap().deref_mut().take() {
-                sx.send(()).unwrap();
-            }
-        }
-        if 1 == self.current_polls.fetch_sub(1, atomic::Ordering::SeqCst) {
-            // last future polling has ended
-
-            let _guard = self.destroy_mutex.lock().unwrap();
-            self.destroy_waiting.notify_all();
+        if !poll_again {
+            let rest_tasks = self.current_tasks.fetch_sub(1, atomic::Ordering::Relaxed) - 1;
+            //println!("future finised. rest: {}", rest_tasks);
+            if rest_tasks == 0 {
+                if let Some((_, sx)) = self.wait_until_empty.lock().unwrap().deref_mut().take() {
+                    sx.send(()).unwrap();
+                }
+            };
         }
     }
 
     pub fn destroy(&self) {
-        self.destroy.store(true, atomic::Ordering::SeqCst);
         //println!("destroy");
-        self.waker_park.wake();
-        let mut guard = self.destroy_mutex.lock().unwrap();
-        while 0 != self.current_polls.load(atomic::Ordering::SeqCst) {
-            guard = self.destroy_waiting.wait(guard).unwrap();
+        self.destroy.store(true, atomic::Ordering::SeqCst);
+
+        while !self.relays.is_empty() {
+            //println!("{} futures left", self.relays.len());
+            let relays: Vec<_> = self.relays.iter().map(|entry| entry.value().clone()).collect();
+            for relay in relays {
+                relay.destroy(self);
+            }
         }
+
+        self.receiver.try_iter().for_each(|_| ());
+
+        self.waker_park.wake();
+    }
+
+    fn destroyed(&self) -> bool {
+        self.destroy.load(atomic::Ordering::SeqCst)
     }
 
     pub fn until_empty(&self) -> UntilEmpty {
+        let mut lock = self.wait_until_empty.lock().unwrap();
         if 0 == self.current_tasks.load(atomic::Ordering::Relaxed) {
             //println!("return empty UntilEmpty");
             let (sx, rx) = oneshot::channel();
             sx.send(()).unwrap();
             return UntilEmpty { receiver: rx.shared() };
         }
-        let mut lock = self.wait_until_empty.lock().unwrap();
         let (rx, _) = lock.get_or_insert_with(|| {
             //println!("new until_empty channel {:?}", self.receiver.len());
             let (sx, rx) = oneshot::channel();

@@ -7,7 +7,7 @@ mod waker_park;
 use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError, SpawnExt};
 pub use relay_pad::UntilEmpty;
 
-use self::relay_future::RelayFuture;
+use self::relay_future::UnsafeRelayFuture;
 use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
@@ -56,12 +56,14 @@ impl<'sc> RelayScope<'sc> {
     }
 
     pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'static)) {
-        let fut = unsafe { RelayFuture::new_global(self.pad.clone(), spawn.clone()) };
+        let fut =
+            unsafe { UnsafeRelayFuture::new_global(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
         spawn.spawn(fut).unwrap();
     }
 
     pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) {
-        let fut = unsafe { RelayFuture::new_local(self.pad.clone(), spawn.clone()) };
+        let fut =
+            unsafe { UnsafeRelayFuture::new_local(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
         spawn.spawn_local(fut).unwrap();
     }
 
