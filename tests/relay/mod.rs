@@ -4,8 +4,7 @@ use std::sync::atomic::Ordering::*;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
-use futures::channel::mpsc;
-use futures::channel::oneshot;
+use futures::channel::{mpsc, oneshot};
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
@@ -89,12 +88,12 @@ fn test_spawner_status() {
     let spawner = {
         let scope = new_relay_scope!();
         let spawner = scope.spawner();
-        assert!(spawner.status().is_ok());
-        assert!(spawner.status_scoped().is_ok());
+        spawner.status().unwrap();
+        spawner.status_scoped().unwrap();
         spawner
     };
-    assert!(spawner.status().is_err());
-    assert!(spawner.status_scoped().is_err());
+    spawner.status().unwrap_err();
+    spawner.status_scoped().unwrap_err();
 }
 
 #[test]
@@ -181,13 +180,13 @@ fn test_pool_drop() {
         let (sx, rx) = oneshot::channel();
 
         scope
-        .spawner()
-        .spawn_scoped(async move {
-            *called.lock().unwrap() += 1;
-            let _ = rx.await;
-            *called.lock().unwrap() += 1;
-        })
-        .unwrap();
+            .spawner()
+            .spawn_scoped(async move {
+                *called.lock().unwrap() += 1;
+                let _ = rx.await;
+                *called.lock().unwrap() += 1;
+            })
+            .unwrap();
 
         {
             assert_eq!(*called.lock().unwrap(), 0);
@@ -199,7 +198,6 @@ fn test_pool_drop() {
 
             sx.send(()).unwrap();
         }
-
 
         {
             let mut pool = LocalPool::new();

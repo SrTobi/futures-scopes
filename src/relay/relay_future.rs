@@ -112,25 +112,40 @@ impl<'sc, Sp> Unpinned<'sc, Sp> {
     }
 }
 
+#[derive(Debug)]
+struct ActiveFuture<'sc> {
+    future: Option<FutureObj<'sc, ()>>,
+    destroyed: bool,
+}
+
+impl<'sc> ActiveFuture<'sc> {
+    fn new() -> Self {
+        Self {
+            future: None,
+            destroyed: false,
+        }
+    }
+}
+
 #[pin_project]
 #[derive(Debug)]
 pub struct RelayFutureInner<'sc> {
     #[pin]
-    future: Mutex<(Option<FutureObj<'sc, ()>>, bool)>,
+    active: Mutex<ActiveFuture<'sc>>,
     id: RelayFutureId,
 }
 
 impl<'sc> RelayFutureInner<'sc> {
     pub fn destroy(&self, pad: &RelayPad<'sc>) {
-        let mut guard = self.future.lock().unwrap_or_else(|err| err.into_inner());
-        if !guard.1 {
+        let mut guard = self.active.lock().unwrap_or_else(|err| err.into_inner());
+        if !guard.destroyed {
             // destroy our future
             //println!("Destroy inner");
-            let fut = guard.0.take();
-            guard.1 = true;
+            let fut = guard.future.take();
+            guard.destroyed = true;
             pad.unregister_relay_future(self.id, fut);
         }
-        debug_assert!(guard.0.is_none());
+        debug_assert!(guard.future.is_none());
     }
 
     pub fn id(&self) -> RelayFutureId {
@@ -153,7 +168,7 @@ impl<'sc, Sp> RelayFuture<'sc, Sp> {
         let id = manager.register();
         let inst = Self {
             inner: Arc::new(RelayFutureInner {
-                future: Mutex::new((None, false)),
+                active: Mutex::new(ActiveFuture::new()),
                 id,
             }),
             unpinned: Unpinned {
@@ -188,7 +203,7 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
         let unpinned = &this.unpinned;
         //println!("RelayFutureInner::poll");
         let mut finished_tasks = 0;
-        let future_cell = &mut this.inner.future.lock().unwrap().0;
+        let future_cell = &mut this.inner.active.lock().unwrap().future;
         loop {
             if let Some(fut) = future_cell {
                 //println!("RelayFutureInner::poll start polling future");
@@ -256,12 +271,7 @@ pub struct UnsafeRelayFuture<Sp> {
 }
 
 impl<Sp> UnsafeRelayFuture<Sp> {
-    unsafe fn new_full<'sc>(
-        pad: Arc<RelayPad<'sc>>,
-        spawn: Sp,
-        root: bool,
-        manager: Arc<SpawnManager>,
-    ) -> Self {
+    unsafe fn new_full<'sc>(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, manager: Arc<SpawnManager>) -> Self {
         let static_pad = std::mem::transmute::<Arc<RelayPad<'sc>>, Arc<RelayPad<'static>>>(pad);
         Self {
             inner: RelayFuture::new(static_pad, spawn, root, manager),
