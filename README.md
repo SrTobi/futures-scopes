@@ -12,10 +12,6 @@ When the scope is dropped, all futures of that spawn will be immediately dropped
 
 As a scope is a `Spawn` itself, it can spawn further nested scopes inside it.
 
-## Do not use just yet!
-
-I have to fix some unsafe stuff.
-
 ## Example
 
 ```rust
