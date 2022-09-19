@@ -10,15 +10,15 @@ use pin_project::{pin_project, pinned_drop};
 use super::relay_pad::{RelayPad, TaskDequeueErr};
 
 trait Respawn {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool);
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool);
 }
 
 #[derive(Clone)]
 pub struct GlobalRespawn<Sp>(Sp);
 
 impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
-        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
+        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
         self.0.spawn(fut).ok();
     }
 }
@@ -27,8 +27,8 @@ impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
 pub struct LocalRespawn<Sp>(Sp);
 
 impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, respawn_counter: Arc<RespawnCounter>, root: bool) {
-        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, respawn_counter) };
+    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
+        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
         self.0.spawn_local(fut).ok();
     }
 }
@@ -40,14 +40,14 @@ pub struct RelayFutureId {
 }
 
 #[derive(Debug)]
-struct RespawnCounter {
+struct SpawnManager {
     non_working: AtomicUsize,
     all: AtomicUsize,
     id: usize,
     next_instance: AtomicUsize,
 }
 
-impl RespawnCounter {
+impl SpawnManager {
     fn new(id: usize) -> Self {
         Self {
             non_working: AtomicUsize::new(0),
@@ -57,7 +57,7 @@ impl RespawnCounter {
         }
     }
 
-    fn subscribe(&self) -> RelayFutureId {
+    fn register(&self) -> RelayFutureId {
         self.non_working.fetch_add(1, atomic::Ordering::Relaxed);
         self.all.fetch_add(1, atomic::Ordering::Relaxed);
 
@@ -67,7 +67,7 @@ impl RespawnCounter {
         }
     }
 
-    fn unsubscribe(&self) {
+    fn unregister(&self) {
         self.non_working.fetch_sub(1, atomic::Ordering::Relaxed);
         self.all.fetch_sub(1, atomic::Ordering::Relaxed);
     }
@@ -80,7 +80,7 @@ impl RespawnCounter {
 }
 
 #[derive(Debug)]
-struct RespawnCounterPollingGuard<'c>(&'c RespawnCounter, bool);
+struct RespawnCounterPollingGuard<'c>(&'c SpawnManager, bool);
 
 impl<'c> RespawnCounterPollingGuard<'c> {
     fn should_respawn(&self) -> bool {
@@ -99,7 +99,7 @@ struct Unpinned<'sc, Sp> {
     pad: Arc<RelayPad<'sc>>,
     root: bool,
     spawn: Sp,
-    respawn_counter: Arc<RespawnCounter>,
+    manager: Arc<SpawnManager>,
 }
 
 impl<'sc, Sp> Unpinned<'sc, Sp> {
@@ -107,8 +107,8 @@ impl<'sc, Sp> Unpinned<'sc, Sp> {
     where
         Sp: Respawn,
     {
-        //println!("spawn another RelayFuture {:?}", self.respawn_counter);
-        self.spawn.respawn(self.pad.clone(), self.respawn_counter.clone(), root);
+        //println!("spawn another RelayFuture {:?}", self.manager);
+        self.spawn.respawn(self.pad.clone(), self.manager.clone(), root);
     }
 }
 
@@ -149,8 +149,8 @@ struct RelayFuture<'sc, Sp> {
 }
 
 impl<'sc, Sp> RelayFuture<'sc, Sp> {
-    fn new(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, respawn_counter: Arc<RespawnCounter>) -> Self {
-        let id = respawn_counter.subscribe();
+    fn new(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, manager: Arc<SpawnManager>) -> Self {
+        let id = manager.register();
         let inst = Self {
             inner: Arc::new(RelayFutureInner {
                 future: Mutex::new((None, false)),
@@ -160,7 +160,7 @@ impl<'sc, Sp> RelayFuture<'sc, Sp> {
                 pad,
                 root,
                 spawn,
-                respawn_counter,
+                manager,
             },
         };
         inst.unpinned.pad.register_relay_future(inst.inner.clone());
@@ -176,12 +176,7 @@ impl<'sc, Sp> PinnedDrop for RelayFuture<'sc, Sp> {
         let unpinned = this.unpinned;
         this.inner.destroy(&unpinned.pad);
 
-        unpinned.respawn_counter.unsubscribe();
-        //println!("dropped RelayFuture {:?}", unpinned.respawn_counter);
-        /*let fut = this.future.take();
-        if let Some(fut) = fut {
-            unpinned.pad.rescue_future(fut);
-        }*/
+        unpinned.manager.unregister();
     }
 }
 
@@ -199,7 +194,7 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
                 //println!("RelayFutureInner::poll start polling future");
                 if let Some(mut poll_guard) = unpinned.pad.start_future_polling() {
                     //println!("RelayFutureInner::poll got guard. polling inner");
-                    let _respawn_guard = unpinned.respawn_counter.start_polling();
+                    let _respawn_guard = unpinned.manager.start_polling();
                     if _respawn_guard.should_respawn() {
                         unpinned.respawn(false);
                     }
@@ -265,11 +260,11 @@ impl<Sp> UnsafeRelayFuture<Sp> {
         pad: Arc<RelayPad<'sc>>,
         spawn: Sp,
         root: bool,
-        respawn_counter: Arc<RespawnCounter>,
+        manager: Arc<SpawnManager>,
     ) -> Self {
         let static_pad = std::mem::transmute::<Arc<RelayPad<'sc>>, Arc<RelayPad<'static>>>(pad);
         Self {
-            inner: RelayFuture::new(static_pad, spawn, root, respawn_counter),
+            inner: RelayFuture::new(static_pad, spawn, root, manager),
         }
     }
 }
@@ -279,7 +274,7 @@ impl<Sp> UnsafeRelayFuture<GlobalRespawn<Sp>> {
     where
         Sp: Spawn + Clone + Send + 'static,
     {
-        Self::new_full(pad, GlobalRespawn(spawn), true, Arc::new(RespawnCounter::new(spawn_id)))
+        Self::new_full(pad, GlobalRespawn(spawn), true, Arc::new(SpawnManager::new(spawn_id)))
     }
 }
 
@@ -288,7 +283,7 @@ impl<Sp> UnsafeRelayFuture<LocalRespawn<Sp>> {
     where
         Sp: LocalSpawn + Clone + 'static,
     {
-        Self::new_full(pad, LocalRespawn(spawn), true, Arc::new(RespawnCounter::new(spawn_id)))
+        Self::new_full(pad, LocalRespawn(spawn), true, Arc::new(SpawnManager::new(spawn_id)))
     }
 }
 

@@ -42,13 +42,14 @@ macro_rules! new_relay_scope {
 impl<'sc> RelayScope<'sc> {
     /// Creates a new RelayScope
     ///
-    /// Spawned futures can reference everything covered by 'sc.
+    /// Spawned futures can reference everything covered by `'sc`.
     ///
     /// # Safety
     /// It is of utmost important that the created scope is dropped at the end of 'sc.
     /// Especially [`std::mem::forget`] should not be used on this type.
     /// Failing to drop this correctly can lead to spawned futures having references
     /// into undefined memory (namely when they reference something on the stack that is already popped).
+    /// Use [`new_relay_scope`] to safely create a RelayScope, that cannot not be dropped.
     pub unsafe fn unchecked_new() -> Self {
         Self {
             pad: Arc::new(RelayPad::new()),
@@ -124,95 +125,3 @@ impl<'sc> Spawn for RelayScopeSpawner<'sc> {
         self.status_scoped()
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-
-    use std::future::pending;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
-
-    use futures::channel::oneshot;
-    use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
-
-    use super::RelayScope;
-    use crate::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
-    use crate::{ScopedSpawnExt, SpawnScope};
-
-
-    #[test]
-        fn test_relay_scope() {
-            #[derive(Debug)]
-            struct Unmovable(i32);
-            let unmovable = Unmovable(100);
-            let mut pool = LocalPool::new();
-            let (sx, rx) = oneshot::channel();
-            {
-                let relay_scope = new_relay_scope!();
-                pool.spawner().spawn_scope_local(&relay_scope);
-                let spawner = relay_scope.spawner();
-
-                spawner
-                    .spawn_scoped(async {
-                        println!("unmovable: {:?}", unmovable);
-                    })
-                    .unwrap();
-
-                spawner
-                    .spawn_scoped(async {
-                        println!("never end {:?}", unmovable);
-                        rx.await.unwrap();
-                        println!("received data {:?}", unmovable);
-                    })
-                    .unwrap();
-
-                pool.run_until_stalled();
-            }
-            println!("pool.run");
-            sx.send(()).ok();
-            pool.run();
-        }
-    #[test]
-    fn test_on_thread_pool() {
-        let pool = ThreadPool::new().unwrap();
-
-        let until_empty = {
-            let scope = new_relay_scope!();
-
-            pool.spawn_scope(scope);
-
-            let spawner = scope.spawner();
-
-            for i in 0..1000 {
-                spawner
-                    .spawn_scoped(async move {
-                        println!("process {} on {:?}", i, thread::current().id());
-                        //panic!();
-                    })
-                    .unwrap();
-            }
-
-            let until_empty = scope.until_empty();
-
-            block_on(scope.until_empty());
-            println!("done... do some more");
-
-            for _ in 0..50 {
-                spawner
-                    .spawn_scoped(async {
-                        println!("in second scope");
-                    })
-                    .unwrap();
-            }
-
-            until_empty
-        };
-        println!("scope destroyed");
-        thread::sleep(Duration::from_millis(300));
-        block_on(until_empty);
-    }
-}
-
-*/
