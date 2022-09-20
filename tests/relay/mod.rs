@@ -18,7 +18,7 @@ fn test_mutate_outer() {
         let scope = new_relay_scope!();
 
         let pool = ThreadPool::new().unwrap();
-        pool.spawn_scope(scope);
+        pool.spawn_scope(scope).unwrap();
 
         scope
             .spawner()
@@ -58,7 +58,7 @@ fn test_futures_are_dropped() {
     let counter = Arc::new(());
     {
         let scope = new_relay_scope!();
-        pool.spawner().spawn_scope_local(scope);
+        pool.spawner().spawn_scope_local(scope).unwrap();
 
         for _ in 0..50 {
             let counter = counter.clone();
@@ -76,7 +76,7 @@ fn test_futures_are_dropped() {
         scope
             .spawner()
             .spawn_scoped(async move {
-                let _conuter = counter;
+                let _counter = counter;
             })
             .unwrap();
     }
@@ -102,7 +102,7 @@ fn test_panic_in_spawned() {
     let scope = new_relay_scope!();
 
     let pool = ThreadPool::new().unwrap();
-    pool.spawn_scope(scope);
+    pool.spawn_scope(scope).unwrap();
 
     let inner_counter = counter.clone();
     scope
@@ -125,7 +125,7 @@ fn test_can_continue_after_panic() {
         let scope = new_relay_scope!();
 
         let pool = ThreadPoolBuilder::new().pool_size(2).create().unwrap();
-        pool.spawn_scope(scope);
+        pool.spawn_scope(scope).unwrap();
 
         scope
             .spawner()
@@ -154,7 +154,7 @@ fn test_on_local_pool() {
         let scope = new_relay_scope!();
 
         let mut pool = LocalPool::new();
-        pool.spawner().spawn_scope_local(scope);
+        pool.spawner().spawn_scope_local(scope).unwrap();
 
         for _ in 0..50 {
             scope
@@ -191,7 +191,7 @@ fn test_pool_drop() {
         {
             assert_eq!(*called.lock().unwrap(), 0);
             let mut pool = LocalPool::new();
-            pool.spawner().spawn_scope_local(scope);
+            pool.spawner().spawn_scope_local(scope).unwrap();
             let did_run_one = pool.try_run_one();
             assert!(did_run_one);
             assert_eq!(*called.lock().unwrap(), 1);
@@ -201,7 +201,7 @@ fn test_pool_drop() {
 
         {
             let mut pool = LocalPool::new();
-            scope.relay_to_local(&pool.spawner());
+            scope.relay_to_local(&pool.spawner()).unwrap();
             pool.run_until(scope.until_empty());
             assert_eq!(*called.lock().unwrap(), 2);
         }
@@ -213,7 +213,7 @@ fn test_scope_in_scope() {
     let outer_scope = new_relay_scope!();
 
     let pool = ThreadPool::new().unwrap();
-    pool.spawn_scope(outer_scope);
+    pool.spawn_scope(outer_scope).unwrap();
 
     let (sx, mut rx) = mpsc::channel(1);
 
@@ -222,7 +222,7 @@ fn test_scope_in_scope() {
         .spawner()
         .spawn_scoped(async move {
             let inner_scope = new_relay_scope!();
-            outer_spawner.spawn_scope(inner_scope);
+            outer_spawner.spawn_scope(inner_scope).unwrap();
 
             for i in 0..1000 {
                 let mut sx = sx.clone();
@@ -289,8 +289,8 @@ fn test_run_on_multiple_pools() {
     let count2 = AtomicUsize::new(0);
 
     let scope = new_relay_scope!();
-    pool1.spawn_scope(scope);
-    pool2.spawn_scope(scope);
+    pool1.spawn_scope(scope).unwrap();
+    pool2.spawn_scope(scope).unwrap();
 
     while count1.load(Relaxed) < 10 && count2.load(Relaxed) < 10 {
         scope
@@ -316,7 +316,7 @@ async fn example(spawn: &(impl Spawn + Clone + Send + 'static)) {
     // Create a scope.
     // Futures spawned on `scope` can reference everything before new_relay_scope!()
     let scope = new_relay_scope!();
-    spawn.spawn_scope(scope);
+    spawn.spawn_scope(scope).unwrap();
 
     // Create a new Spawner that spawns futures on the scope.
     // `spawner` is a Spawn+Clone+Send+'static,
