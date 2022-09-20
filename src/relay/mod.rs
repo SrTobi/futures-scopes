@@ -71,11 +71,46 @@ impl<'sc> RelayScope<'sc> {
     pub fn until_empty(&self) -> UntilEmpty {
         self.pad.until_empty()
     }
+
+    /// Prevents new tasks from being spawned and cleans up all existing tasks.
+    /// 
+    /// Calling this function is effectively the same as dropping the Scope.
+    /// Afterwards the scope can be used normally, but all attempts to spawn
+    /// new futures will fail with a [`shutdown error`].
+    /// 
+    /// 
+    /// [`shutdown error`]: futures::task::SpawnError
+    ///
+    /// # Blocking
+    ///
+    /// This method blocks the current thread to cleanup the remaining tasks.
+    /// Like drop it will wait for currently running, non-pending tasks to finish
+    /// execution, before dropping them.
+    /// 
+    /// ```
+    /// use futures_scopes::*;
+    /// use futures::executor::block_on;
+    /// 
+    /// let scope = new_relay_scope!();
+    /// 
+    /// // stop the scope
+    /// scope.stop();
+    /// 
+    /// // New spawn attempts will fail
+    /// scope.spawner().spawn_scoped(async { /* ... */ }).unwrap_err();
+    /// 
+    /// // The future returned by until_empty will continue to work
+    /// // and return immediately 
+    /// block_on(scope.until_empty());
+    /// ```
+    pub fn stop(&self) {
+        self.pad.destroy();
+    }
 }
 
 impl<'sc> Drop for RelayScope<'sc> {
     fn drop(&mut self) {
-        self.pad.destroy();
+        self.stop();
     }
 }
 
