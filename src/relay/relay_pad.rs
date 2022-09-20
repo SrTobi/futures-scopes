@@ -137,7 +137,7 @@ impl<'sc> RelayPad<'sc> {
             //println!("{} futures left", self.relays.len());
             let relays: Vec<_> = self.relays.iter().map(|entry| entry.value().clone()).collect();
             for relay in relays {
-                relay.destroy(self);
+                relay.destroy(self, false);
             }
         }
 

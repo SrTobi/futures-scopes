@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::pin::Pin;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
@@ -97,6 +98,7 @@ impl<'c> Drop for RespawnCounterPollingGuard<'c> {
 #[derive(Debug)]
 struct Unpinned<'sc, Sp> {
     pad: Arc<RelayPad<'sc>>,
+    panicked: Cell<bool>,
     root: bool,
     spawn: Sp,
     manager: Arc<SpawnManager>,
@@ -136,14 +138,14 @@ pub struct RelayFutureInner<'sc> {
 }
 
 impl<'sc> RelayFutureInner<'sc> {
-    pub fn destroy(&self, pad: &RelayPad<'sc>) {
+    pub fn destroy(&self, pad: &RelayPad<'sc>, rescue_future: bool) {
         let mut guard = self.active.lock().unwrap_or_else(|err| err.into_inner());
         if !guard.destroyed {
             // destroy our future
             //println!("Destroy inner");
             let fut = guard.future.take();
             guard.destroyed = true;
-            pad.unregister_relay_future(self.id, fut);
+            pad.unregister_relay_future(self.id, fut.filter(|_| rescue_future));
         }
         debug_assert!(guard.future.is_none());
     }
@@ -173,6 +175,7 @@ impl<'sc, Sp> RelayFuture<'sc, Sp> {
             }),
             unpinned: Unpinned {
                 pad,
+                panicked: Cell::new(false),
                 root,
                 spawn,
                 manager,
@@ -189,7 +192,7 @@ impl<'sc, Sp> PinnedDrop for RelayFuture<'sc, Sp> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
         let unpinned = this.unpinned;
-        this.inner.destroy(&unpinned.pad);
+        this.inner.destroy(&unpinned.pad, !unpinned.panicked.get());
 
         unpinned.manager.unregister();
     }
@@ -200,7 +203,7 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let this = self.as_mut().project();
-        let unpinned = &this.unpinned;
+        let unpinned = this.unpinned;
         //println!("RelayFutureInner::poll");
         let mut finished_tasks = 0;
         let future_cell = &mut this.inner.active.lock().unwrap().future;
@@ -209,8 +212,8 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
                 //println!("RelayFutureInner::poll start polling future");
                 if let Some(mut poll_guard) = unpinned.pad.start_future_polling() {
                     //println!("RelayFutureInner::poll got guard. polling inner");
-                    let _respawn_guard = unpinned.manager.start_polling();
-                    if _respawn_guard.should_respawn() {
+                    let respawn_guard = unpinned.manager.start_polling();
+                    if respawn_guard.should_respawn() {
                         unpinned.respawn(false);
                     }
 
@@ -220,6 +223,7 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
                             if self.1 {
                                 //println!("polling panicked.. respawn to ensure at least one future is present");
                                 self.0.respawn(true);
+                                self.0.panicked.set(true);
                             }
                         }
                     }
