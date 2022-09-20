@@ -12,16 +12,16 @@ use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
-    fn spawn_scope_local<'sc>(&self, scope: &RelayScope<'sc>) {
-        scope.relay_to_local(self);
+    fn spawn_scope_local<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError> {
+        scope.relay_to_local(self)
     }
 }
 
 impl<Sp: LocalSpawn + Clone + 'static + ?Sized> RelayScopeLocalSpawning for Sp {}
 
 pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
-    fn spawn_scope<'sc>(&self, scope: &RelayScope<'sc>) {
-        scope.relay_to(self);
+    fn spawn_scope<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError> {
+        scope.relay_to(self)
     }
 }
 
@@ -37,6 +37,20 @@ macro_rules! new_relay_scope {
     () => {{
         &unsafe { $crate::relay::RelayScope::unchecked_new() }
     }};
+}
+
+impl RelayScope<'static> {
+    pub fn new() -> Self {
+        unsafe {
+            Self::unchecked_new()
+        }
+    }
+}
+
+impl Default for RelayScope<'static> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'sc> RelayScope<'sc> {
@@ -56,16 +70,16 @@ impl<'sc> RelayScope<'sc> {
         }
     }
 
-    pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'static)) {
+    pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'static)) -> Result<(), SpawnError> {
         let fut =
             unsafe { UnsafeRelayFuture::new_global(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        spawn.spawn(fut).unwrap();
+        spawn.spawn(fut)
     }
 
-    pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) {
+    pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) -> Result<(), SpawnError> {
         let fut =
             unsafe { UnsafeRelayFuture::new_local(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        spawn.spawn_local(fut).unwrap();
+        spawn.spawn_local(fut)
     }
 
     pub fn until_empty(&self) -> UntilEmpty {
