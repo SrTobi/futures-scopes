@@ -12,7 +12,7 @@ use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
-    fn spawn_scope_local<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError> {
+    fn spawn_scope_local(&self, scope: &RelayScope) -> Result<(), SpawnError> {
         scope.relay_to_local(self)
     }
 }
@@ -20,7 +20,7 @@ pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
 impl<Sp: LocalSpawn + Clone + 'static + ?Sized> RelayScopeLocalSpawning for Sp {}
 
 pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
-    fn spawn_scope<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError> {
+    fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
         scope.relay_to(self)
     }
 }
