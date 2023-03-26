@@ -55,7 +55,7 @@ impl<'sc> RelayPad<'sc> {
     pub fn unregister_relay_future(&self, id: RelayFutureId, fut: Option<FutureObj<'sc, ()>>) {
         //println!("unregister future {:?}", id);
         let old = self.relays.remove(&id);
-        debug_assert!(old.is_some(), "Expected {:?} to have been registered", id);
+        debug_assert!(old.is_some(), "Expected {id:?} to have been registered");
 
         if !self.is_destroyed() {
             if let Some(fut) = fut {
@@ -91,13 +91,13 @@ impl<'sc> RelayPad<'sc> {
                 Ok(task) => return Ok(task),
                 Err(_) => {
                     //println!("no tasks {:?}", cx);
-                    if let Some(cx) = &cx {
-                        match self.waker_park.wait(cx.waker().clone(), token) {
-                            WaitResult::Ok => return Err(TaskDequeueErr::WaitingForTasks),
-                            WaitResult::TokenMismatch => continue,
-                        }
-                    } else {
+                    let Some(cx) = &cx else {
                         return Err(TaskDequeueErr::NoTasks);
+                    };
+
+                    match self.waker_park.wait(cx.waker().clone(), token) {
+                        WaitResult::Ok => return Err(TaskDequeueErr::WaitingForTasks),
+                        WaitResult::TokenMismatch => continue,
                     }
                 }
             }
