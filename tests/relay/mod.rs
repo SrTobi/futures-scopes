@@ -8,7 +8,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
-use futures_scopes::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
+use futures_scopes::relay::{RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning};
 use futures_scopes::{new_relay_scope, ScopedSpawn, ScopedSpawnExt, SpawnScope};
 
 #[test]
@@ -206,6 +206,55 @@ fn test_pool_drop() {
             assert_eq!(*called.lock().unwrap(), 2);
         }
     }
+}
+
+#[test]
+fn test_waiting() {
+    fn build_task_chain(
+        scope: &RelayScope<'static>,
+        prev: oneshot::Receiver<usize>,
+        n: usize,
+    ) -> oneshot::Receiver<usize> {
+        if n == 0 {
+            prev
+        } else {
+            let (sx, rx) = oneshot::channel();
+            let spawn = || {
+                scope
+                    .spawner()
+                    .spawn_scoped(async move {
+                        let prev = prev.await.unwrap();
+                        sx.send(prev + 1).unwrap();
+                    })
+                    .unwrap();
+            };
+
+            // Scrumble up the order of the tasks
+            if n % 2 == 0 {
+                let rx = build_task_chain(scope, rx, n - 1);
+                spawn();
+                rx
+            } else {
+                spawn();
+                build_task_chain(scope, rx, n - 1)
+            }
+        }
+    }
+
+    const N: usize = 100;
+
+    let scope = RelayScope::new();
+    let (sx, rx) = oneshot::channel();
+    let rx = build_task_chain(&scope, rx, N);
+
+    let mut pool = LocalPool::new();
+    scope.relay_to_local(&pool.spawner()).unwrap();
+
+    pool.run_until(async move {
+        sx.send(0).unwrap();
+        println!("sent");
+        assert_eq!(rx.await.unwrap(), N);
+    });
 }
 
 #[test]
