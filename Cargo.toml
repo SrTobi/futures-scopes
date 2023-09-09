@@ -11,13 +11,16 @@ publish = true
 repository = "https://github.com/SrTobi/futures-scopes/"
 version = "0.1.6"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["local", "relay"]
+local = []
+relay = ["dep:dashmap", "dep:crossbeam-channel"]
 
 [dependencies]
-crossbeam-channel = "0.5.6"
-dashmap = "5.4.0"
-futures = { version = "0.3.24", default-features = false, features = [ "std" ] }
+crossbeam-channel = {version = "0.5.6", optional = true}
+dashmap = {version = "5.4.0", optional = true}
+futures = {version = "0.3.24", default-features = false, features = ["std"]}
 pin-project = "1.0.12"
 
 [dev-dependencies]
-futures = { default-features = true, features = [ "thread-pool" ] }
+futures = {default-features = true, features = ["thread-pool"]}
