@@ -16,5 +16,8 @@ version = "0.1.6"
 [dependencies]
 crossbeam-channel = "0.5.6"
 dashmap = "5.4.0"
-futures = {version = "0.3.24", features = ["thread-pool"]}
+futures = { version = "0.3.24", default-features = false, features = [ "std" ] }
 pin-project = "1.0.12"
+
+[dev-dependencies]
+futures = { default-features = true, features = [ "thread-pool" ] }
