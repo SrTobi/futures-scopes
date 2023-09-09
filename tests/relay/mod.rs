@@ -308,7 +308,6 @@ fn test_run_on_multiple_pools() {
             .unwrap();
     }
 }
-
 // An async example function that has access to some kind of spawner
 async fn example(spawn: &(impl Spawn + Clone + Send + 'static)) {
     let counter = AtomicUsize::new(0);

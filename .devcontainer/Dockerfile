@@ -47,7 +47,7 @@ ADD content/docker.zsh-theme .oh-my-zsh/themes/docker.zsh-theme
 
 # setup rust
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain nightly-2022-08-01 -y
+    sh -s -- --default-toolchain nightly-2023-08-01 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

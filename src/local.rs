@@ -5,7 +5,7 @@ use std::mem;
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 
 use futures::stream::FuturesUnordered;
 use futures::task::{noop_waker, FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError};
@@ -14,12 +14,34 @@ use pin_project::pin_project;
 
 use crate::ScopedSpawn;
 
-type IncomingPad<'sc, T> = Rc<RefCell<Option<VecDeque<LocalFutureObj<'sc, T>>>>>;
+#[derive(Debug)]
+struct IncomingPad<'sc, T> {
+    futures: VecDeque<LocalFutureObj<'sc, T>>,
+    waker: Option<Waker>,
+}
+
+impl<'sc, T> IncomingPad<'sc, T> {
+    fn new() -> Self {
+        Self {
+            futures: VecDeque::new(),
+            waker: None,
+        }
+    }
+
+    fn push(&mut self, fut: LocalFutureObj<'sc, T>) {
+        self.futures.push_back(fut);
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
+    }
+}
+
+type IncomingPadRef<'sc, T> = Rc<RefCell<Option<IncomingPad<'sc, T>>>>;
 
 #[derive(Debug)]
 pub struct LocalSpawnScope<'sc, T = ()> {
     futures: FuturesUnordered<LocalFutureObj<'sc, T>>,
-    incoming: IncomingPad<'sc, T>,
+    incoming: IncomingPadRef<'sc, T>,
     result: Vec<T>,
 }
 
@@ -27,7 +49,7 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     pub fn new() -> Self {
         Self {
             futures: FuturesUnordered::new(),
-            incoming: Rc::new(RefCell::new(Some(VecDeque::new()))),
+            incoming: Rc::new(RefCell::new(Some(IncomingPad::new()))),
             result: Vec::new(),
         }
     }
@@ -68,12 +90,19 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
 
     fn drain_incoming(&mut self) -> bool {
         let mut incoming = self.incoming.borrow_mut();
-        if let Some(incoming) = incoming.as_mut() {
-            let has_incoming = !incoming.is_empty();
-            self.futures.extend(incoming.drain(..));
+        if let Some(pad) = incoming.as_mut() {
+            pad.waker = None;
+            let has_incoming = !pad.futures.is_empty();
+            self.futures.extend(pad.futures.drain(..));
             has_incoming
         } else {
             false
+        }
+    }
+
+    fn register_waker_on_incoming(&mut self, cx: &mut Context<'_>) {
+        if let Some(pad) = self.incoming.borrow_mut().as_mut() {
+            pad.waker = Some(cx.waker().clone());
         }
     }
 }
@@ -118,10 +147,13 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
                     scope.result.push(result);
                     continue;
                 }
-                Poll::Ready(None) => return Poll::Pending,
-                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => break,
+                Poll::Pending => break,
             };
         }
+
+        scope.register_waker_on_incoming(cx);
+        Poll::Pending
     }
 }
 
@@ -177,6 +209,9 @@ impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
             };
 
             if !scope.drain_incoming() {
+                if result.is_pending() {
+                    scope.register_waker_on_incoming(cx);
+                }
                 return result;
             }
         }
@@ -185,7 +220,7 @@ impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
 
 #[derive(Debug)]
 pub struct LocalSpawnScopeSpawner<'sc, T> {
-    scope: IncomingPad<'sc, T>,
+    scope: IncomingPadRef<'sc, T>,
 }
 
 impl<'sc, T> Clone for LocalSpawnScopeSpawner<'sc, T> {
@@ -200,7 +235,7 @@ impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
     pub fn spawn_scoped_local_obj(&self, future: LocalFutureObj<'sc, T>) -> Result<(), SpawnError> {
         let mut incoming = self.scope.borrow_mut();
         if let Some(incoming) = incoming.as_mut() {
-            incoming.push_back(future);
+            incoming.push(future);
             Ok(())
         } else {
             Err(SpawnError::shutdown())
