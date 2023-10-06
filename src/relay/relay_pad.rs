@@ -201,6 +201,7 @@ impl<'l, 'sc> Drop for FuturePollingGuard<'l, 'sc> {
     }
 }
 
+/// Future returned by [`RelaySco5e::until_empty`](super::RelayScope::until_empty).
 #[pin_project]
 pub struct UntilEmpty {
     #[pin]

@@ -4,11 +4,9 @@ use futures::task::{FutureObj, SpawnError};
 
 /// A scope that can spawn non-static futures
 pub trait ScopedSpawn<'sc, T> {
-    /// Spawns a future that will be run to completion.
+    /// Spawns a task that polls the given future.
     ///
-    /// # Errors
-    ///
-    /// The scope may be unable to spawn tasks (if it was dropped for example).
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
     fn spawn_obj_scoped(&self, future: FutureObj<'sc, T>) -> Result<(), SpawnError>;
 
     /// Determines whether the scope is able to spawn new tasks.
@@ -27,8 +25,7 @@ pub trait ScopedSpawn<'sc, T> {
 pub trait ScopedSpawnExt<'a, T>: ScopedSpawn<'a, T> {
     /// Spawns a task that polls the given future.
     ///
-    /// This method returns a [`Result`] that contains a [`SpawnError`] if
-    /// spawning fails.
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
     fn spawn_scoped<Fut>(&self, future: Fut) -> Result<(), SpawnError>
     where
         Fut: Future<Output = T> + Send + 'a,

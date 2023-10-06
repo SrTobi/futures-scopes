@@ -38,6 +38,40 @@ impl<'sc, T> IncomingPad<'sc, T> {
 
 type IncomingPadRef<'sc, T> = Rc<RefCell<Option<IncomingPad<'sc, T>>>>;
 
+/// A spawn scope that can be used to spawn non-send/sync futures of lifetime `'sc`.
+///
+/// Spawned futures are not processed until the scope is polled by awaiting one of the
+/// futures returned by [`until`](Self::until), [`until_stalled`](Self::until_stalled) or [`until_empty`](Self::until_stalled).
+///
+/// Spawned futures can return a result of type `T` that can be accessed via [`results`](Self::results) or [`take_results`](Self::take_results).
+///
+/// # Dropping
+/// If the scope is dropped, all futures that where spawned on it will be dropped as well.
+///
+/// # Examples
+///
+/// ```
+/// # use futures::future::FutureExt;
+/// # use futures::task::LocalSpawnExt;
+/// # use futures::executor::block_on;
+/// use futures_scopes::local::LocalSpawnScope;
+///
+/// let some_value = &42;
+///
+/// let mut scope = LocalSpawnScope::<usize>::new();
+/// let spawner = scope.spawner();
+/// spawner.spawn_local_scoped(async {
+///   // You can reference `some_value` here
+///   *some_value
+/// }).unwrap();
+///
+/// // Process the scope and wait until all futures have been ready
+/// block_on(scope.until_empty());
+///
+/// // use `scope.results()` to access the results of the spawned futures
+/// assert_eq!(scope.results(), &[42]);
+/// ```
+///
 #[derive(Debug)]
 pub struct LocalSpawnScope<'sc, T = ()> {
     futures: FuturesUnordered<LocalFutureObj<'sc, T>>,
@@ -46,6 +80,9 @@ pub struct LocalSpawnScope<'sc, T = ()> {
 }
 
 impl<'sc, T> LocalSpawnScope<'sc, T> {
+    /// Creates a new spawn scope.
+    ///
+    /// Spawned futures can reference anything before the creation of the scope.
     pub fn new() -> Self {
         Self {
             futures: FuturesUnordered::new(),
@@ -54,17 +91,76 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
         }
     }
 
+    /// Get a cloneable spawner that can be used to spawn local futures to this scope.
+    ///
+    /// This spawner can live longer then the scope.
+    /// In case a future is spawned after the scope has been dropped, the spawner will return [`SpawnError::shutdown`].
     pub fn spawner(&self) -> LocalSpawnScopeSpawner<'sc, T> {
         LocalSpawnScopeSpawner {
             scope: self.incoming.clone(),
         }
     }
 
+    /// Drops all spawned futures and prevents new futures from being spawned.
+    ///
+    /// In case a future is spawned after `cancel` has been called, the spawner will return [`SpawnError::shutdown`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use futures::future::FutureExt;
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::task::SpawnError;
+    /// # use futures::executor::block_on;
+    /// use futures_scopes::local::LocalSpawnScope;
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// let spawner = scope.spawner();
+    /// spawner.spawn_local_scoped(async {
+    ///  // ...
+    /// }).unwrap();
+    ///
+    /// scope.cancel();
+    /// let res = spawner.spawn_local_scoped(async { () });
+    ///
+    /// assert!(matches!(res, Err(err) if err.is_shutdown()));
+    /// ```
     pub fn cancel(&mut self) {
         self.drain_incoming();
         self.incoming.borrow_mut().take();
     }
 
+    /// Returns a future that polls the scope until the given future `fut` is ready.
+    ///
+    /// The returned future will guarantee that at least some progress is made
+    /// on the futures spawned on this scope, by polling all these futures at least once.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures::future::{FutureExt, pending};
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::executor::block_on;
+    /// # use std::cell::RefCell;
+    /// # use futures_scopes::local::LocalSpawnScope;
+    /// let counter = RefCell::new(0);
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// let spawner = scope.spawner();
+    /// for _ in 0..10 {
+    ///   spawner.spawn_local_scoped(async {
+    ///     *counter.borrow_mut() += 1;
+    ///   }).unwrap();
+    /// }
+    ///
+    /// // Spawning a never-ready future will not hinder .until from returning
+    /// spawner.spawn_local_scoped(pending()).unwrap();
+    ///
+    /// block_on(scope.until(async {
+    ///   // at least one future has been polled ready
+    ///   assert!(*counter.borrow() == 10);
+    /// }));
+    /// ```
+    ///
     pub fn until<Fut: Future>(&mut self, fut: Fut) -> Until<'_, 'sc, T, Fut> {
         Until {
             scope: self,
@@ -72,18 +168,134 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
         }
     }
 
+    /// Returns a future that polls the scope until no further progress can be made,
+    /// because all spawned futures are pending or the scope is empty.
+    ///
+    /// Guarantees that all spawned futures are polled at least once.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures::future::{FutureExt, pending};
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::executor::block_on;
+    /// # use std::cell::RefCell;
+    /// # use futures::channel::oneshot;
+    /// # use futures_scopes::local::LocalSpawnScope;
+    /// let counter = RefCell::new(0);
+    /// let (sx, rx) = oneshot::channel();
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// scope.spawner().spawn_local_scoped(async {
+    ///   *counter.borrow_mut() += 1;
+    ///
+    ///    // wait until the oneshot is ready
+    ///   rx.await.unwrap();
+    ///
+    ///   *counter.borrow_mut() += 1;
+    /// }).unwrap();
+    ///
+    /// assert!(*counter.borrow() == 0);
+    ///
+    /// block_on(scope.until_stalled());
+    ///
+    /// // scope is stalled because the future is waiting for rx
+    /// assert!(*counter.borrow() == 1);
+    /// sx.send(()).unwrap();
+    ///
+    /// block_on(scope.until_stalled());
+    ///
+    /// // scope is empty because the future has finished
+    /// assert!(*counter.borrow() == 2);
+    /// ```
+    ///
     pub fn until_stalled(&mut self) -> UntilStalled<'_, 'sc, T> {
         UntilStalled { scope: self }
     }
 
+    /// Returns a future that polls the scope until all spawned futures have been polled ready.
+    ///
+    /// # Examples
+    /// ```
+    /// # use futures::future::{FutureExt, pending};
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::executor::block_on;
+    /// # use std::cell::RefCell;
+    /// # use futures_scopes::local::LocalSpawnScope;
+    /// let counter = RefCell::new(0);
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// let spawner = scope.spawner();
+    /// for _ in 0..10 {
+    ///   spawner.spawn_local_scoped(async {
+    ///     *counter.borrow_mut() += 1;
+    ///   }).unwrap();
+    /// }
+    ///
+    /// // Spawning a never-ready future will block .until_empty from ever returning
+    /// // spawner.spawn_local_scoped(pending()).unwrap();
+    ///
+    /// block_on(scope.until_empty());
+    ///
+    /// // all futures have been polled ready
+    /// assert!(*counter.borrow() == 10);
+    /// ```
+    ///
     pub fn until_empty(&mut self) -> UntilEmpty<'_, 'sc, T> {
         UntilEmpty { scope: self }
     }
 
+    /// Returns a reference to the results of all futures that have been polled ready until now.
+    ///
+    /// To take ownership of the results, use [`take_results`](Self::take_results).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use futures::future::{FutureExt, pending};
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::executor::block_on;
+    /// # use futures_scopes::local::LocalSpawnScope;
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// let spawner = scope.spawner();
+    /// for i in 0..5 {
+    ///     spawner.spawn_local_scoped(async move {
+    ///        i
+    ///    }).unwrap();
+    /// }
+    ///
+    /// block_on(scope.until_empty());
+    ///
+    /// assert_eq!(scope.results(), &[0, 1, 2, 3, 4]);
     pub fn results(&self) -> &Vec<T> {
         &self.result
     }
 
+    /// Returns the results of all futures that have been polled ready until now.
+    /// This removes the results from the scope.
+    /// This does not hinder future results from being added to the scope.
+    ///
+    /// To **not** take ownership of the results, use [`results`](Self::results).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use futures::future::{FutureExt, pending};
+    /// # use futures::task::LocalSpawnExt;
+    /// # use futures::executor::block_on;
+    /// # use futures_scopes::local::LocalSpawnScope;
+    ///
+    /// let mut scope = LocalSpawnScope::new();
+    /// let spawner = scope.spawner();
+    /// for i in 0..5 {
+    ///     spawner.spawn_local_scoped(async move {
+    ///        i
+    ///    }).unwrap();
+    /// }
+    ///
+    /// block_on(scope.until_empty());
+    ///
+    /// assert_eq!(scope.take_results(), vec![0, 1, 2, 3, 4]);
     pub fn take_results(mut self) -> Vec<T> {
         mem::take(&mut self.result)
     }
@@ -120,6 +332,7 @@ impl<'sc, T> Default for LocalSpawnScope<'sc, T> {
     }
 }
 
+/// Future returned by [`until`](LocalSpawnScope::until).
 #[pin_project]
 #[derive(Debug)]
 pub struct Until<'s, 'sc, T, Fut> {
@@ -157,6 +370,7 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
     }
 }
 
+/// Future returned by [`until_stalled`](LocalSpawnScope::until_stalled).
 #[derive(Debug)]
 pub struct UntilStalled<'s, 'sc, T> {
     scope: &'s mut LocalSpawnScope<'sc, T>,
@@ -188,6 +402,7 @@ impl<'s, 'sc, T> Future for UntilStalled<'s, 'sc, T> {
     }
 }
 
+/// Future returned by [`until_empty`](LocalSpawnScope::until_empty).
 #[derive(Debug)]
 pub struct UntilEmpty<'s, 'sc, T> {
     scope: &'s mut LocalSpawnScope<'sc, T>,
@@ -218,6 +433,11 @@ impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
     }
 }
 
+/// A spawner that can be obtained from [`LocalSpawnScope::spawner`].
+/// 
+/// This spawner may live longer then the scope.
+/// In case a future is spawned after the scope has been canceled or dropped,
+/// the spawner will return [`SpawnError::shutdown`].
 #[derive(Debug)]
 pub struct LocalSpawnScopeSpawner<'sc, T> {
     scope: IncomingPadRef<'sc, T>,
@@ -232,6 +452,11 @@ impl<'sc, T> Clone for LocalSpawnScopeSpawner<'sc, T> {
 }
 
 impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
+    /// Spawns a task that polls the given local future.
+    /// 
+    /// # Errors
+    ///
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
     pub fn spawn_scoped_local_obj(&self, future: LocalFutureObj<'sc, T>) -> Result<(), SpawnError> {
         let mut incoming = self.scope.borrow_mut();
         if let Some(incoming) = incoming.as_mut() {
@@ -242,6 +467,11 @@ impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
         }
     }
 
+    /// Spawns a task that polls the given local future.
+    /// 
+    /// # Errors
+    ///
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
     pub fn spawn_local_scoped<Fut>(&self, future: Fut) -> Result<(), SpawnError>
     where
         Fut: Future<Output = T> + 'sc,
