@@ -23,4 +23,4 @@ futures = {version = "0.3.24", default-features = false, features = ["std"]}
 pin-project = "1.0.12"
 
 [dev-dependencies]
-futures = {default-features = true, features = ["thread-pool"]}
+futures = {version = "0.3.24", default-features = true, features = ["thread-pool"]}
