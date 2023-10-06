@@ -37,12 +37,12 @@ impl<Sp: Spawn + Clone + Send + ?Sized + 'static> RelayScopeSpawning for Sp {}
 /// registered with [`relay_to`](RelayScope::relay_to) or [`relay_to_local`](RelayScope::relay_to_local).
 /// These *relay-tasks* will replicate themselves to fill up the underlying spawns, but not overwhelm them.
 /// This behavior makes it possible to consolidate multiple spawns into one.
-/// 
+///
 /// **Important**: Spawned futures will not be polled until [`relay_to`](RelayScope::relay_to)
 ///                or [`relay_to_local`](RelayScope::relay_to_local) is used to spawn this scope
 ///                onto another spawn. Especially [`until_empty`](RelayScope::until_empty) will not poll
 ///                any future that was spawned onto the scope
-///                (unlike [`LocalSpawnScope::until_empty`](crate::local::LocalSpawnScope::until_empty)).
+///                (unlike [`LocalScope::until_empty`](crate::local::LocalScope::until_empty)).
 ///
 /// To safely create a RelayScope, use [`new_relay_scope!`].
 ///
@@ -66,7 +66,7 @@ impl<Sp: Spawn + Clone + Send + ?Sized + 'static> RelayScopeSpawning for Sp {}
 /// let task_done = Mutex::new(false);
 ///
 /// let scope = new_relay_scope!();
-/// 
+///
 /// // Spawn the scope on both the thread pool and the local pool
 /// scope.relay_to(&thread_pool).unwrap();
 /// scope.relay_to_local(&local_pool.spawner()).unwrap();
@@ -74,7 +74,7 @@ impl<Sp: Spawn + Clone + Send + ?Sized + 'static> RelayScopeSpawning for Sp {}
 /// scope.spawner().spawn_scoped(async {
 ///   // This is either executed on the thread pool or the local pool
 ///   println!("Hello from the scope!");
-/// 
+///
 ///   // task_done can safely be referenced without using Arc
 ///   *task_done.lock().unwrap() = true;
 /// }).unwrap();
@@ -115,7 +115,7 @@ pub struct RelayScope<'sc> {
 /// [`Spawn`](futures::task::Spawn)s
 /// as arguments.
 /// The scope will then be spawned onto all of them.
-/// 
+///
 /// Because the actual value cannot be accessed, it cannot be moved out of scope or be [`std::mem::forget`]ten,
 /// which could lead to undefined behavior.
 ///
@@ -127,7 +127,7 @@ pub struct RelayScope<'sc> {
 ///
 /// let thread_pool = ThreadPool::new().unwrap();
 /// let pool = LocalPool::new();
-/// 
+///
 /// let scope1 = new_relay_scope!();
 /// let scope2 = new_relay_scope!(thread_pool, pool.spawner());
 /// ```
@@ -207,26 +207,26 @@ impl<'sc> RelayScope<'sc> {
     ///
     /// This does not effect the ability to spawn new futures,
     /// and new futures may have been spawned onto the scope before `.until_empty().await` even returns.
-    /// 
-    /// Note that unlike [`LocalSpawnScope::until_empty`](crate::local::LocalSpawnScope::until_empty), the returned `UntilEmpty` future
+    ///
+    /// Note that unlike [`LocalScope::until_empty`](crate::local::LocalScope::until_empty), the returned `UntilEmpty` future
     /// does not poll any future that was spawned onto the scope.
     /// Use [`relay_to`](RelayScope::relay_to) or [`relay_to_local`](RelayScope::relay_to_local), otherwise this future will never complete.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// # use futures_scopes::*;
     /// # use futures_scopes::relay::*;
     /// # use futures::executor::{ThreadPool, block_on};
     /// let scope = new_relay_scope!();
-    /// 
+    ///
     /// // Relay the scope to a thread pool
     /// let thread_pool = ThreadPool::new().unwrap();
     /// scope.relay_to(&thread_pool).unwrap();
-    /// 
+    ///
     /// // Spawn some task
     /// scope.spawner().spawn_scoped(async { /* ... */ }).unwrap();
-    /// 
+    ///
     /// // Because task will be executed on another thread, we won't run into a deadlock
     /// // when blocking this thread.
     /// block_on(scope.until_empty());
@@ -251,7 +251,7 @@ impl<'sc> RelayScope<'sc> {
     /// execution, before dropping them.
     ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// # use futures_scopes::*;
     /// # use futures_scopes::relay::*;

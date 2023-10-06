@@ -54,11 +54,11 @@ type IncomingPadRef<'sc, T> = Rc<RefCell<Option<IncomingPad<'sc, T>>>>;
 /// # use futures::future::FutureExt;
 /// # use futures::task::LocalSpawnExt;
 /// # use futures::executor::block_on;
-/// use futures_scopes::local::LocalSpawnScope;
+/// use futures_scopes::local::LocalScope;
 ///
 /// let some_value = &42;
 ///
-/// let mut scope = LocalSpawnScope::<usize>::new();
+/// let mut scope = LocalScope::<usize>::new();
 /// let spawner = scope.spawner();
 /// spawner.spawn_local_scoped(async {
 ///   // You can reference `some_value` here
@@ -73,13 +73,13 @@ type IncomingPadRef<'sc, T> = Rc<RefCell<Option<IncomingPad<'sc, T>>>>;
 /// ```
 ///
 #[derive(Debug)]
-pub struct LocalSpawnScope<'sc, T = ()> {
+pub struct LocalScope<'sc, T = ()> {
     futures: FuturesUnordered<LocalFutureObj<'sc, T>>,
     incoming: IncomingPadRef<'sc, T>,
     result: Vec<T>,
 }
 
-impl<'sc, T> LocalSpawnScope<'sc, T> {
+impl<'sc, T> LocalScope<'sc, T> {
     /// Creates a new spawn scope.
     ///
     /// Spawned futures can reference anything before the creation of the scope.
@@ -95,8 +95,8 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     ///
     /// This spawner can live longer then the scope.
     /// In case a future is spawned after the scope has been dropped, the spawner will return [`SpawnError::shutdown`].
-    pub fn spawner(&self) -> LocalSpawnScopeSpawner<'sc, T> {
-        LocalSpawnScopeSpawner {
+    pub fn spawner(&self) -> LocalScopeSpawner<'sc, T> {
+        LocalScopeSpawner {
             scope: self.incoming.clone(),
         }
     }
@@ -112,9 +112,9 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::task::LocalSpawnExt;
     /// # use futures::task::SpawnError;
     /// # use futures::executor::block_on;
-    /// use futures_scopes::local::LocalSpawnScope;
+    /// use futures_scopes::local::LocalScope;
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// let spawner = scope.spawner();
     /// spawner.spawn_local_scoped(async {
     ///  // ...
@@ -141,10 +141,10 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::task::LocalSpawnExt;
     /// # use futures::executor::block_on;
     /// # use std::cell::RefCell;
-    /// # use futures_scopes::local::LocalSpawnScope;
+    /// # use futures_scopes::local::LocalScope;
     /// let counter = RefCell::new(0);
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// let spawner = scope.spawner();
     /// for _ in 0..10 {
     ///   spawner.spawn_local_scoped(async {
@@ -180,11 +180,11 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::executor::block_on;
     /// # use std::cell::RefCell;
     /// # use futures::channel::oneshot;
-    /// # use futures_scopes::local::LocalSpawnScope;
+    /// # use futures_scopes::local::LocalScope;
     /// let counter = RefCell::new(0);
     /// let (sx, rx) = oneshot::channel();
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// scope.spawner().spawn_local_scoped(async {
     ///   *counter.borrow_mut() += 1;
     ///
@@ -220,10 +220,10 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::task::LocalSpawnExt;
     /// # use futures::executor::block_on;
     /// # use std::cell::RefCell;
-    /// # use futures_scopes::local::LocalSpawnScope;
+    /// # use futures_scopes::local::LocalScope;
     /// let counter = RefCell::new(0);
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// let spawner = scope.spawner();
     /// for _ in 0..10 {
     ///   spawner.spawn_local_scoped(async {
@@ -245,7 +245,7 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     }
 
     /// Returns a reference to the results of all futures that have been polled ready until now.
-    /// 
+    ///
     /// Results are not ordered in any specific way.
     ///
     /// To take ownership of the results, use [`take_results`](Self::take_results).
@@ -256,9 +256,9 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::future::{FutureExt, pending};
     /// # use futures::task::LocalSpawnExt;
     /// # use futures::executor::block_on;
-    /// # use futures_scopes::local::LocalSpawnScope;
+    /// # use futures_scopes::local::LocalScope;
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// let spawner = scope.spawner();
     /// for i in 0..5 {
     ///     spawner.spawn_local_scoped(async move {
@@ -287,9 +287,9 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// # use futures::future::{FutureExt, pending};
     /// # use futures::task::LocalSpawnExt;
     /// # use futures::executor::block_on;
-    /// # use futures_scopes::local::LocalSpawnScope;
+    /// # use futures_scopes::local::LocalScope;
     ///
-    /// let mut scope = LocalSpawnScope::new();
+    /// let mut scope = LocalScope::new();
     /// let spawner = scope.spawner();
     /// for i in 0..5 {
     ///     spawner.spawn_local_scoped(async move {
@@ -323,24 +323,24 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     }
 }
 
-impl<'sc, T> Drop for LocalSpawnScope<'sc, T> {
+impl<'sc, T> Drop for LocalScope<'sc, T> {
     fn drop(&mut self) {
         // Close the stream so that spawners can give a shutdown error
         self.incoming.borrow_mut().take();
     }
 }
 
-impl<'sc, T> Default for LocalSpawnScope<'sc, T> {
+impl<'sc, T> Default for LocalScope<'sc, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Future returned by [`until`](LocalSpawnScope::until).
+/// Future returned by [`until`](LocalScope::until).
 #[pin_project]
 #[derive(Debug)]
 pub struct Until<'s, 'sc, T, Fut> {
-    scope: &'s mut LocalSpawnScope<'sc, T>,
+    scope: &'s mut LocalScope<'sc, T>,
     #[pin]
     future: Fut,
 }
@@ -374,10 +374,10 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
     }
 }
 
-/// Future returned by [`until_stalled`](LocalSpawnScope::until_stalled).
+/// Future returned by [`until_stalled`](LocalScope::until_stalled).
 #[derive(Debug)]
 pub struct UntilStalled<'s, 'sc, T> {
-    scope: &'s mut LocalSpawnScope<'sc, T>,
+    scope: &'s mut LocalScope<'sc, T>,
 }
 
 impl<'s, 'sc, T> Future for UntilStalled<'s, 'sc, T> {
@@ -406,10 +406,10 @@ impl<'s, 'sc, T> Future for UntilStalled<'s, 'sc, T> {
     }
 }
 
-/// Future returned by [`until_empty`](LocalSpawnScope::until_empty).
+/// Future returned by [`until_empty`](LocalScope::until_empty).
 #[derive(Debug)]
 pub struct UntilEmpty<'s, 'sc, T> {
-    scope: &'s mut LocalSpawnScope<'sc, T>,
+    scope: &'s mut LocalScope<'sc, T>,
 }
 
 impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
@@ -437,17 +437,17 @@ impl<'s, 'sc, T> Future for UntilEmpty<'s, 'sc, T> {
     }
 }
 
-/// A spawner that can be obtained from [`LocalSpawnScope::spawner`].
-/// 
+/// A spawner that can be obtained from [`LocalScope::spawner`].
+///
 /// This spawner may live longer then the scope.
 /// In case a future is spawned after the scope has been canceled or dropped,
 /// the spawner will return [`SpawnError::shutdown`].
 #[derive(Debug)]
-pub struct LocalSpawnScopeSpawner<'sc, T> {
+pub struct LocalScopeSpawner<'sc, T> {
     scope: IncomingPadRef<'sc, T>,
 }
 
-impl<'sc, T> Clone for LocalSpawnScopeSpawner<'sc, T> {
+impl<'sc, T> Clone for LocalScopeSpawner<'sc, T> {
     fn clone(&self) -> Self {
         Self {
             scope: self.scope.clone(),
@@ -455,9 +455,9 @@ impl<'sc, T> Clone for LocalSpawnScopeSpawner<'sc, T> {
     }
 }
 
-impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
+impl<'sc, T> LocalScopeSpawner<'sc, T> {
     /// Spawns a task that polls the given local future.
-    /// 
+    ///
     /// # Errors
     ///
     /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
@@ -472,7 +472,7 @@ impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
     }
 
     /// Spawns a task that polls the given local future.
-    /// 
+    ///
     /// # Errors
     ///
     /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
@@ -484,7 +484,7 @@ impl<'sc, T> LocalSpawnScopeSpawner<'sc, T> {
     }
 }
 
-impl<'sc, T> ScopedSpawn<'sc, T> for LocalSpawnScopeSpawner<'sc, T> {
+impl<'sc, T> ScopedSpawn<'sc, T> for LocalScopeSpawner<'sc, T> {
     fn spawn_obj_scoped(&self, future: FutureObj<'sc, T>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future.into())
     }
@@ -498,7 +498,7 @@ impl<'sc, T> ScopedSpawn<'sc, T> for LocalSpawnScopeSpawner<'sc, T> {
     }
 }
 
-impl<'sc> LocalSpawn for LocalSpawnScopeSpawner<'sc, ()> {
+impl<'sc> LocalSpawn for LocalScopeSpawner<'sc, ()> {
     fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_scoped_local_obj(future)
     }
@@ -508,7 +508,7 @@ impl<'sc> LocalSpawn for LocalSpawnScopeSpawner<'sc, ()> {
     }
 }
 
-impl<'sc> Spawn for LocalSpawnScopeSpawner<'sc, ()> {
+impl<'sc> Spawn for LocalScopeSpawner<'sc, ()> {
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.spawn_obj_scoped(future)
     }

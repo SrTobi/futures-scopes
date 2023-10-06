@@ -4,13 +4,13 @@ use std::rc::Rc;
 use futures::channel::oneshot::channel;
 use futures::executor::block_on;
 use futures::{select_biased, FutureExt};
-use futures_scopes::local::LocalSpawnScope;
+use futures_scopes::local::LocalScope;
 
 #[test]
 fn test_mutate_outer() {
     let mut called = true;
     {
-        let mut scope = LocalSpawnScope::new();
+        let mut scope = LocalScope::new();
 
         scope
             .spawner()
@@ -28,7 +28,7 @@ fn test_mutate_outer() {
 fn test_drop_without_spawner() {
     let counter = Rc::new(());
     {
-        let scope = LocalSpawnScope::new();
+        let scope = LocalScope::new();
 
         for _ in 0..50 {
             let counter = counter.clone();
@@ -46,7 +46,7 @@ fn test_drop_without_spawner() {
 
 #[test]
 fn test_spawn_outside_until_empty() {
-    let mut scope = LocalSpawnScope::new();
+    let mut scope = LocalScope::new();
     let spawner = scope.spawner();
 
     let (sx, rx) = channel();
@@ -81,7 +81,7 @@ fn test_spawn_outside_until_empty() {
 
 #[test]
 fn test_spawn_outside_until() {
-    let mut scope = LocalSpawnScope::new();
+    let mut scope = LocalScope::new();
     let spawner = scope.spawner();
 
     let (sx, rx) = channel();
