@@ -1,8 +1,8 @@
 //! An extension to [futures-rs](https://github.com/rust-lang/futures-rs) that offers scopes.
 //! Scopes can be used to spawn non-static futures that can reference variables on the stack
-//! that where created before the scope was created.
+//! that were created before the scope was created.
 //! 
-//! There are currently two different Scope options:
+//! There are currently two different Scope types:
 //! - For spawning local non-send/sync futures, use [`LocalSpawnScope`](local::LocalSpawnScope).
 //! - For spawning futures on multiple, underlying spawns, use [`RelayScope`](relay::RelayScope).
 //!

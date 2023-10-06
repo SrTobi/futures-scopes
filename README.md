@@ -4,7 +4,7 @@
 
 # futures-scopes
 
-An extension to [futures-rs](https://github.com/rust-lang/futures-rs) that offers scopes.
+An extension to [futures-rs](https://github.com/rust-lang/futures-rs) that offers Scopes.
 Scopes can be used to spawn non-static futures that can reference variables on the stack
 that where created before the scope was created.
 The scope will relay these futures onto one of multiple underlying spawns.

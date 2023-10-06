@@ -65,7 +65,7 @@ type IncomingPadRef<'sc, T> = Rc<RefCell<Option<IncomingPad<'sc, T>>>>;
 ///   *some_value
 /// }).unwrap();
 ///
-/// // Process the scope and wait until all futures have been ready
+/// // Process the scope and wait until all futures have been completed
 /// block_on(scope.until_empty());
 ///
 /// // use `scope.results()` to access the results of the spawned futures
@@ -245,6 +245,8 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     }
 
     /// Returns a reference to the results of all futures that have been polled ready until now.
+    /// 
+    /// Results are not ordered in any specific way.
     ///
     /// To take ownership of the results, use [`take_results`](Self::take_results).
     ///
@@ -274,6 +276,8 @@ impl<'sc, T> LocalSpawnScope<'sc, T> {
     /// Returns the results of all futures that have been polled ready until now.
     /// This removes the results from the scope.
     /// This does not hinder future results from being added to the scope.
+    ///
+    /// Results are not ordered in any specific way.
     ///
     /// To **not** take ownership of the results, use [`results`](Self::results).
     ///

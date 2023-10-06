@@ -11,7 +11,7 @@ use self::relay_future::UnsafeRelayFuture;
 use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
-/// A local spawn that can be spawned onto a [`RelayScope`](RelayScope).
+/// A local spawn that can be spawned onto a [`RelayScope`].
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
     /// Add this spawn to `scope` and relay spawned futures to it.
     fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
@@ -21,7 +21,7 @@ pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
 
 impl<Sp: LocalSpawn + Clone + 'static + ?Sized> RelayScopeLocalSpawning for Sp {}
 
-/// A spawn that can be spawned onto a [`RelayScope`](RelayScope).
+/// A spawn that can be spawned onto a [`RelayScope`].
 pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
     /// Add this spawn to `scope` and relay spawned futures to it.
     fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
