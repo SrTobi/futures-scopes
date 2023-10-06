@@ -135,11 +135,6 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
         let this = self.as_mut().project();
         let scope = this.scope.deref_mut();
 
-        match this.future.poll(cx) {
-            Poll::Ready(result) => return Poll::Ready(result),
-            Poll::Pending => (),
-        }
-
         loop {
             scope.drain_incoming();
             match scope.futures.poll_next_unpin(cx) {
@@ -152,8 +147,13 @@ impl<'s, 'sc, T, Fut: Future> Future for Until<'s, 'sc, T, Fut> {
             };
         }
 
-        scope.register_waker_on_incoming(cx);
-        Poll::Pending
+        match this.future.poll(cx) {
+            Poll::Ready(result) => Poll::Ready(result),
+            Poll::Pending => {
+                scope.register_waker_on_incoming(cx);
+                Poll::Pending
+            }
+        }
     }
 }
 
