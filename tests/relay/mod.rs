@@ -8,8 +8,8 @@ use futures::channel::{mpsc, oneshot};
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
-use futures_scopes::relay::{RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning};
-use futures_scopes::{new_relay_scope, ScopedSpawn, ScopedSpawnExt, SpawnScope};
+use futures_scopes::relay::{new_relay_scope, RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning};
+use futures_scopes::{ScopedSpawn, ScopedSpawnExt, SpawnScope};
 
 #[test]
 fn test_mutate_outer() {
@@ -57,8 +57,7 @@ fn test_futures_are_dropped() {
     let mut pool = LocalPool::new();
     let counter = Arc::new(());
     {
-        let scope = new_relay_scope!();
-        pool.spawner().spawn_scope_local(scope).unwrap();
+        let scope = new_relay_scope!(pool.spawner());
 
         for _ in 0..50 {
             let counter = counter.clone();
@@ -99,10 +98,8 @@ fn test_spawner_status() {
 #[test]
 fn test_panic_in_spawned() {
     let counter = Arc::new(());
-    let scope = new_relay_scope!();
-
     let pool = ThreadPool::new().unwrap();
-    pool.spawn_scope(scope).unwrap();
+    let scope = new_relay_scope!(pool);
 
     let inner_counter = counter.clone();
     scope
@@ -151,10 +148,8 @@ fn test_can_continue_after_panic() {
 fn test_on_local_pool() {
     let called = Mutex::new(0);
     {
-        let scope = new_relay_scope!();
-
         let mut pool = LocalPool::new();
-        pool.spawner().spawn_scope_local(scope).unwrap();
+        let scope = new_relay_scope!(pool.spawner());
 
         for _ in 0..50 {
             scope
@@ -191,7 +186,7 @@ fn test_pool_drop() {
         {
             assert_eq!(*called.lock().unwrap(), 0);
             let mut pool = LocalPool::new();
-            pool.spawner().spawn_scope_local(scope).unwrap();
+            pool.spawner().spawn_scope(scope).unwrap();
             let did_run_one = pool.try_run_one();
             assert!(did_run_one);
             assert_eq!(*called.lock().unwrap(), 1);
@@ -259,10 +254,8 @@ fn test_waiting() {
 
 #[test]
 fn test_scope_in_scope() {
-    let outer_scope = new_relay_scope!();
-
     let pool = ThreadPool::new().unwrap();
-    pool.spawn_scope(outer_scope).unwrap();
+    let outer_scope = new_relay_scope!(pool);
 
     let (sx, mut rx) = mpsc::channel(1);
 
@@ -337,9 +330,7 @@ fn test_run_on_multiple_pools() {
     let count1 = AtomicUsize::new(0);
     let count2 = AtomicUsize::new(0);
 
-    let scope = new_relay_scope!();
-    pool1.spawn_scope(scope).unwrap();
-    pool2.spawn_scope(scope).unwrap();
+    let scope = new_relay_scope!(pool1, pool2);
 
     while count1.load(Relaxed) < 10 && count2.load(Relaxed) < 10 {
         scope
@@ -357,6 +348,7 @@ fn test_run_on_multiple_pools() {
             .unwrap();
     }
 }
+
 // An async example function that has access to some kind of spawner
 async fn example(spawn: &(impl Spawn + Clone + Send + 'static)) {
     let counter = AtomicUsize::new(0);

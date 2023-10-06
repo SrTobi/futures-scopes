@@ -12,7 +12,7 @@ use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
 pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
-    fn spawn_scope_local(&self, scope: &RelayScope) -> Result<(), SpawnError> {
+    fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
         scope.relay_to_local(self)
     }
 }
@@ -33,11 +33,25 @@ pub struct RelayScope<'sc> {
 }
 
 #[macro_export]
-macro_rules! new_relay_scope {
+macro_rules! __new_relay_scope__ {
     () => {{
         &unsafe { $crate::relay::RelayScope::unchecked_new() }
     }};
+    ($($scopes:expr),+) => {{
+        let create_custom_scope = || {
+            use $crate::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
+            let scope = unsafe { $crate::relay::RelayScope::unchecked_new() };
+            $(
+                $scopes.spawn_scope(&scope).unwrap();
+            )+
+            scope
+        };
+        &create_custom_scope()
+    }};
 }
+
+#[doc(inline)]
+pub use __new_relay_scope__ as new_relay_scope;
 
 impl RelayScope<'static> {
     pub fn new() -> Self {
