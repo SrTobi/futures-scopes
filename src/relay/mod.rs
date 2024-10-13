@@ -19,7 +19,7 @@ pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
     }
 }
 
-impl<Sp: LocalSpawn + Clone + 'static + ?Sized> RelayScopeLocalSpawning for Sp {}
+impl<Sp: LocalSpawn + Clone + 'static> RelayScopeLocalSpawning for Sp {}
 
 /// A spawn that can be spawned onto a [`RelayScope`].
 pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
@@ -29,7 +29,7 @@ pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
     }
 }
 
-impl<Sp: Spawn + Clone + Send + ?Sized + 'static> RelayScopeSpawning for Sp {}
+impl<Sp: Spawn + Clone + Send + 'static> RelayScopeSpawning for Sp {}
 
 /// A spawn scope that can be used to spawn futures of lifetime `'sc` onto multiple underlying spawns.
 ///
