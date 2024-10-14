@@ -142,7 +142,7 @@ macro_rules! __new_relay_scope__ {
             use $crate::relay::{RelayScopeLocalSpawning, RelayScopeSpawning};
             let scope = unsafe { $crate::relay::RelayScope::unchecked_new() };
             $(
-                $scopes.spawn_scope(&scope).unwrap();
+                $scopes.spawn_scope(&scope).ok();
             )+
             scope
         };
