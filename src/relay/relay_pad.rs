@@ -156,15 +156,16 @@ impl<'sc> RelayPad<'sc> {
             //println!("return empty UntilEmpty");
             let (sx, rx) = oneshot::channel();
             sx.send(()).unwrap();
-            return UntilEmpty { receiver: rx.shared() };
-        }
-        let (rx, _) = lock.get_or_insert_with(|| {
-            //println!("new until_empty channel {:?}", self.receiver.len());
-            let (sx, rx) = oneshot::channel();
-            (rx.shared(), sx)
-        });
+            UntilEmpty { receiver: rx.shared() }
+        } else {
+            let (rx, _) = lock.get_or_insert_with(|| {
+                //println!("new until_empty channel {:?}", self.receiver.len());
+                let (sx, rx) = oneshot::channel();
+                (rx.shared(), sx)
+            });
 
-        UntilEmpty { receiver: rx.clone() }
+            UntilEmpty { receiver: rx.clone() }
+        }
     }
 }
 /*
