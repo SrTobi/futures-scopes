@@ -1,3 +1,5 @@
+mod fuzzy;
+
 use std::future::pending;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::*;
