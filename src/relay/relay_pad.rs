@@ -4,6 +4,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
+use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use futures::channel::oneshot;
 use futures::future::Shared;
@@ -46,9 +47,23 @@ impl<'sc> RelayPad<'sc> {
         self.next_spawn_id.fetch_add(1, atomic::Ordering::Relaxed)
     }
 
-    pub fn register_relay_future(&self, relay: Arc<RelayFutureInner<'sc>>) {
-        if !self.destroy.load(atomic::Ordering::SeqCst) {
-            self.relays.insert(relay.id(), relay);
+    pub fn register_relay_future(&self, relay: RelayFutureInner<'sc>) -> Option<Arc<RelayFutureInner<'sc>>> {
+        let id = relay.id();
+        let entry = self.relays.entry(id);
+        // now that we hold an entry into the relay-set, we can check the destroy flag,
+        if self.is_destroyed() {
+            // we don't insert anything, so we don't effect self.destroy()
+            None
+        } else {
+            // if the pad should be destroyed right now, we are holding a lock into self.relays
+            // so the self.relays cleanup loop in self.destroy() will wait for us to release the lock
+            let relay = Arc::new(relay);
+            debug_assert!(
+                matches!(entry, Entry::Vacant(_)),
+                "Relay future is already registered (id={id:?})"
+            );
+            entry.insert(relay.clone());
+            Some(relay)
         }
     }
 

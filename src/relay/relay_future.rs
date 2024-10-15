@@ -20,7 +20,9 @@ pub struct GlobalRespawn<Sp>(Sp);
 impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
     fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
         let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
-        self.0.spawn(fut).ok();
+        if let Some(fut) = fut {
+            self.0.spawn(fut).ok();
+        }
     }
 }
 
@@ -30,7 +32,9 @@ pub struct LocalRespawn<Sp>(Sp);
 impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
     fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
         let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
-        self.0.spawn_local(fut).ok();
+        if let Some(fut) = fut {
+            self.0.spawn_local(fut).ok();
+        }
     }
 }
 
@@ -166,13 +170,15 @@ struct RelayFuture<'sc, Sp> {
 }
 
 impl<'sc, Sp> RelayFuture<'sc, Sp> {
-    fn new(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, manager: Arc<SpawnManager>) -> Self {
+    fn new(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, manager: Arc<SpawnManager>) -> Option<Self> {
         let id = manager.register();
-        let inst = Self {
-            inner: Arc::new(RelayFutureInner {
-                active: Mutex::new(ActiveFuture::new()),
-                id,
-            }),
+        let inner = pad.register_relay_future(RelayFutureInner {
+            active: Mutex::new(ActiveFuture::new()),
+            id,
+        })?;
+
+        Some(Self {
+            inner,
             unpinned: Unpinned {
                 pad,
                 panicked: Cell::new(false),
@@ -180,9 +186,7 @@ impl<'sc, Sp> RelayFuture<'sc, Sp> {
                 spawn,
                 manager,
             },
-        };
-        inst.unpinned.pad.register_relay_future(inst.inner.clone());
-        inst
+        })
     }
 }
 
@@ -276,16 +280,21 @@ pub struct UnsafeRelayFuture<Sp> {
 }
 
 impl<Sp> UnsafeRelayFuture<Sp> {
-    unsafe fn new_full<'sc>(pad: Arc<RelayPad<'sc>>, spawn: Sp, root: bool, manager: Arc<SpawnManager>) -> Self {
+    unsafe fn new_full<'sc>(
+        pad: Arc<RelayPad<'sc>>,
+        spawn: Sp,
+        root: bool,
+        manager: Arc<SpawnManager>,
+    ) -> Option<Self> {
         let static_pad = std::mem::transmute::<Arc<RelayPad<'sc>>, Arc<RelayPad<'static>>>(pad);
-        Self {
-            inner: RelayFuture::new(static_pad, spawn, root, manager),
-        }
+        Some(Self {
+            inner: RelayFuture::new(static_pad, spawn, root, manager)?,
+        })
     }
 }
 
 impl<Sp> UnsafeRelayFuture<GlobalRespawn<Sp>> {
-    pub unsafe fn new_global(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Self
+    pub unsafe fn new_global(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Option<Self>
     where
         Sp: Spawn + Clone + Send + 'static,
     {
@@ -294,7 +303,7 @@ impl<Sp> UnsafeRelayFuture<GlobalRespawn<Sp>> {
 }
 
 impl<Sp> UnsafeRelayFuture<LocalRespawn<Sp>> {
-    pub unsafe fn new_local(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Self
+    pub unsafe fn new_local(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Option<Self>
     where
         Sp: LocalSpawn + Clone + 'static,
     {

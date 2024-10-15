@@ -190,7 +190,11 @@ impl<'sc> RelayScope<'sc> {
     pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'static)) -> Result<(), SpawnError> {
         let fut =
             unsafe { UnsafeRelayFuture::new_global(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        spawn.spawn(fut)
+        if let Some(fut) = fut {
+            spawn.spawn(fut)
+        } else {
+            Err(SpawnError::shutdown())
+        }
     }
 
     /// Relay this scope to the given local `spawn`.
@@ -200,7 +204,11 @@ impl<'sc> RelayScope<'sc> {
     pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) -> Result<(), SpawnError> {
         let fut =
             unsafe { UnsafeRelayFuture::new_local(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        spawn.spawn_local(fut)
+        if let Some(fut) = fut {
+            spawn.spawn_local(fut)
+        } else {
+            Err(SpawnError::shutdown())
+        }
     }
 
     /// Returns a future that will complete the moment there are no more spawned futures in the scope.
