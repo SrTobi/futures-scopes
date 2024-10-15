@@ -206,11 +206,12 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
         let unpinned = this.unpinned;
         //println!("RelayFutureInner::poll");
         let mut finished_tasks = 0;
+        let this_id = this.inner.id;
         let future_cell = &mut this.inner.active.lock().unwrap().future;
         loop {
             if let Some(fut) = future_cell {
                 //println!("RelayFutureInner::poll start polling future");
-                if let Some(mut poll_guard) = unpinned.pad.start_future_polling() {
+                if let Some(mut poll_guard) = unpinned.pad.start_future_polling(this_id) {
                     //println!("RelayFutureInner::poll got guard. polling inner");
                     let respawn_guard = unpinned.manager.start_polling();
                     if respawn_guard.should_respawn() {

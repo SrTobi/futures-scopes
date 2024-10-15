@@ -1,4 +1,4 @@
-use std::ops::{DerefMut, Not};
+use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
@@ -109,12 +109,17 @@ impl<'sc> RelayPad<'sc> {
         self.sender.send(future).unwrap();
     }*/
 
-    pub fn start_future_polling(&self) -> Option<FuturePollingGuard<'_, 'sc>> {
-        let guard = FuturePollingGuard {
-            pad: self,
-            poll_again: false,
-        };
-        self.is_destroyed().not().then_some(guard)
+    pub fn start_future_polling(&self, id: RelayFutureId) -> Option<FuturePollingGuard<'_, 'sc>> {
+        if self.is_destroyed() {
+            None
+        } else {
+            debug_assert!(self.relays.contains_key(&id));
+            let guard = FuturePollingGuard {
+                pad: self,
+                poll_again: false,
+            };
+            Some(guard)
+        }
     }
 
     fn end_future_polling(&self, poll_again: bool) {
