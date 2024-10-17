@@ -9,7 +9,7 @@ license = "MIT"
 name = "futures-scopes"
 publish = true
 repository = "https://github.com/SrTobi/futures-scopes/"
-version = "0.2.0"
+version = "0.3.0"
 
 [features]
 default = ["local", "relay"]
