@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --tests --verbose
     - name: Run tests
       run: cargo test --verbose
     - name: Run Clippy
-      run: cargo clippy --verbose
+      run: cargo clippy --tests --verbose
     - name: Check format
-      run: cargo fmt --check
+      run: cargo fmt --check --all
