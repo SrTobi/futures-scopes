@@ -4,24 +4,24 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnExt};
+use futures::task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError};
 use futures::Future;
 use pin_project::{pin_project, pinned_drop};
 
 use super::relay_pad::{RelayPad, TaskDequeueErr};
 
-trait Respawn {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool);
+trait Respawn<'sc>: 'sc {
+    fn respawn(&self, pad: Arc<RelayPad<'sc>>, manager: Arc<SpawnManager>, root: bool);
 }
 
 #[derive(Clone)]
 pub struct GlobalRespawn<Sp>(Sp);
 
-impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
-        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
+impl<'sc, Sp: Spawn + Clone + Send + 'sc> Respawn<'sc> for GlobalRespawn<Sp> {
+    fn respawn(&self, pad: Arc<RelayPad<'sc>>, manager: Arc<SpawnManager>, root: bool) {
+        let fut = unsafe { RelayFuture::new_global_raw(pad, self.clone(), root, manager) };
         if let Some(fut) = fut {
-            self.0.spawn(fut).ok();
+            self.0.spawn_obj(fut).ok();
         }
     }
 }
@@ -29,9 +29,9 @@ impl<Sp: Spawn + Clone + Send + 'static> Respawn for GlobalRespawn<Sp> {
 #[derive(Clone)]
 pub struct LocalRespawn<Sp>(Sp);
 
-impl<Sp: LocalSpawn + Clone + 'static> Respawn for LocalRespawn<Sp> {
-    fn respawn(&self, pad: Arc<RelayPad<'_>>, manager: Arc<SpawnManager>, root: bool) {
-        let fut = unsafe { UnsafeRelayFuture::new_full(pad, self.clone(), root, manager) };
+impl<'sc, Sp: LocalSpawn + Clone + 'sc> Respawn<'sc> for LocalRespawn<Sp> {
+    fn respawn(&self, pad: Arc<RelayPad<'sc>>, manager: Arc<SpawnManager>, root: bool) {
+        let fut = unsafe { RelayFuture::new_local_raw(pad, self.clone(), root, manager) };
         if let Some(fut) = fut {
             self.0.spawn_local(fut).ok();
         }
@@ -100,7 +100,7 @@ impl<'c> Drop for RespawnCounterPollingGuard<'c> {
 }
 
 #[derive(Debug)]
-struct Unpinned<'sc, Sp> {
+struct Unpinned<'sc, Sp: 'sc> {
     pad: Arc<RelayPad<'sc>>,
     panicked: Cell<bool>,
     root: bool,
@@ -108,11 +108,8 @@ struct Unpinned<'sc, Sp> {
     manager: Arc<SpawnManager>,
 }
 
-impl<'sc, Sp> Unpinned<'sc, Sp> {
-    fn respawn(&self, root: bool)
-    where
-        Sp: Respawn,
-    {
+impl<'sc, Sp: Respawn<'sc>> Unpinned<'sc, Sp> {
+    fn respawn(&self, root: bool) {
         //println!("spawn another RelayFuture {:?}", self.manager);
         self.spawn.respawn(self.pad.clone(), self.manager.clone(), root);
     }
@@ -202,7 +199,7 @@ impl<'sc, Sp> PinnedDrop for RelayFuture<'sc, Sp> {
     }
 }
 
-impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
+impl<'sc, Sp: Respawn<'sc>> Future for RelayFuture<'sc, Sp> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
@@ -222,8 +219,8 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
                         unpinned.respawn(false);
                     }
 
-                    struct Bomb<'l, 'sc, Sp: Respawn>(&'l Unpinned<'sc, Sp>, bool);
-                    impl<'l, 'sc, Sp: Respawn> Drop for Bomb<'l, 'sc, Sp> {
+                    struct Bomb<'l, 'sc, Sp: Respawn<'sc>>(&'l Unpinned<'sc, Sp>, bool);
+                    impl<'l, 'sc, Sp: Respawn<'sc>> Drop for Bomb<'l, 'sc, Sp> {
                         fn drop(&mut self) {
                             if self.1 {
                                 //println!("polling panicked.. respawn to ensure at least one future is present");
@@ -272,49 +269,88 @@ impl<'sc, Sp: Respawn> Future for RelayFuture<'sc, Sp> {
     }
 }
 
-#[pin_project]
-#[derive(Debug)]
-pub struct UnsafeRelayFuture<Sp> {
-    #[pin]
-    inner: RelayFuture<'static, Sp>,
-}
-
-impl<Sp> UnsafeRelayFuture<Sp> {
-    unsafe fn new_full<'sc>(
+impl<'sc, Sp: 'sc> RelayFuture<'sc, Sp> {
+    unsafe fn new_global_raw(
         pad: Arc<RelayPad<'sc>>,
         spawn: Sp,
         root: bool,
         manager: Arc<SpawnManager>,
-    ) -> Option<Self> {
-        let static_pad = std::mem::transmute::<Arc<RelayPad<'sc>>, Arc<RelayPad<'static>>>(pad);
-        Some(Self {
-            inner: RelayFuture::new(static_pad, spawn, root, manager)?,
-        })
-    }
-}
-
-impl<Sp> UnsafeRelayFuture<GlobalRespawn<Sp>> {
-    pub unsafe fn new_global(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Option<Self>
+    ) -> Option<FutureObj<'static, ()>>
     where
-        Sp: Spawn + Clone + Send + 'static,
+        Sp: Respawn<'sc> + Send,
     {
-        Self::new_full(pad, GlobalRespawn(spawn), true, Arc::new(SpawnManager::new(spawn_id)))
+        let fut = Self::new(pad, spawn, root, manager)?;
+        let fut_obj = FutureObj::new(Box::new(fut));
+        /*
+            This transmute is the lynchpin of the entire RelayScope.
+            Two lifetime issues we have to be aware of:
+            1. The relay future may have futures inside it that are 'sc.
+               Thus these futures may only be processed as long as 'sc is alive.
+               This is ensured by the fact that the RelayScope will wait for
+               all these futures to be dropped before the RelayScope itself is dropped.
+               And the RelayScope must be dropped before 'sc is dropped.
+               Thus we can give the relay future into any 'static context.
+            2. The relay future holds a spawn that lives at least for 'sc.
+               This spawn is not accessed after the RelayScope is dropped.
+               and the spawn will live longer than the RelayScope.
+        */
+        let static_fut = std::mem::transmute::<FutureObj<'sc, ()>, FutureObj<'static, ()>>(fut_obj);
+        Some(static_fut)
     }
-}
 
-impl<Sp> UnsafeRelayFuture<LocalRespawn<Sp>> {
-    pub unsafe fn new_local(pad: Arc<RelayPad<'_>>, spawn: Sp, spawn_id: usize) -> Option<Self>
+    unsafe fn new_local_raw(
+        pad: Arc<RelayPad<'sc>>,
+        spawn: Sp,
+        root: bool,
+        manager: Arc<SpawnManager>,
+    ) -> Option<LocalFutureObj<'static, ()>>
     where
-        Sp: LocalSpawn + Clone + 'static,
+        Sp: Respawn<'sc>,
     {
-        Self::new_full(pad, LocalRespawn(spawn), true, Arc::new(SpawnManager::new(spawn_id)))
+        let fut = Self::new(pad, spawn, root, manager)?;
+        let fut_obj = LocalFutureObj::new(Box::new(fut));
+        /* See RelayFuture::new_global_raw */
+        let static_fut = std::mem::transmute::<LocalFutureObj<'sc, ()>, LocalFutureObj<'static, ()>>(fut_obj);
+        Some(static_fut)
     }
 }
 
-impl<Sp: Respawn> Future for UnsafeRelayFuture<Sp> {
-    type Output = ();
+pub fn spawn_on_global<'sc, Sp: Spawn + Clone + Send + 'sc>(
+    pad: Arc<RelayPad<'sc>>,
+    spawn: Sp,
+    spawn_id: usize,
+) -> Result<(), SpawnError> {
+    let fut = unsafe {
+        RelayFuture::new_global_raw(
+            pad,
+            GlobalRespawn(spawn.clone()),
+            true,
+            Arc::new(SpawnManager::new(spawn_id)),
+        )
+    };
+    if let Some(fut) = fut {
+        spawn.spawn_obj(fut)
+    } else {
+        Err(SpawnError::shutdown())
+    }
+}
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.project().inner.poll(cx)
+pub fn spawn_on_local<'sc, Sp: LocalSpawn + Clone + 'sc>(
+    pad: Arc<RelayPad<'sc>>,
+    spawn: Sp,
+    spawn_id: usize,
+) -> Result<(), SpawnError> {
+    let fut = unsafe {
+        RelayFuture::new_local_raw(
+            pad,
+            LocalRespawn(spawn.clone()),
+            true,
+            Arc::new(SpawnManager::new(spawn_id)),
+        )
+    };
+    if let Some(fut) = fut {
+        spawn.spawn_local_obj(fut)
+    } else {
+        Err(SpawnError::shutdown())
     }
 }

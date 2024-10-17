@@ -4,32 +4,37 @@ mod relay_future;
 mod relay_pad;
 mod waker_park;
 
-use futures::task::{FutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError, SpawnExt};
+use futures::task::{FutureObj, LocalSpawn, Spawn, SpawnError};
 pub use relay_pad::UntilEmpty;
 
-use self::relay_future::UnsafeRelayFuture;
 use self::relay_pad::RelayPad;
 use crate::{ScopedSpawn, SpawnScope};
 
 /// A local spawn that can be spawned onto a [`RelayScope`].
-pub trait RelayScopeLocalSpawning: LocalSpawn + Clone + 'static {
+pub trait RelayScopeLocalSpawning: LocalSpawn + Clone {
     /// Add this spawn to `scope` and relay spawned futures to it.
-    fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
+    fn spawn_scope<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError>
+    where
+        Self: 'sc,
+    {
         scope.relay_to_local(self)
     }
 }
 
-impl<Sp: LocalSpawn + Clone + 'static> RelayScopeLocalSpawning for Sp {}
+impl<Sp: LocalSpawn + Clone> RelayScopeLocalSpawning for Sp {}
 
 /// A spawn that can be spawned onto a [`RelayScope`].
-pub trait RelayScopeSpawning: Spawn + Clone + 'static + Send {
+pub trait RelayScopeSpawning: Spawn + Clone + Send {
     /// Add this spawn to `scope` and relay spawned futures to it.
-    fn spawn_scope(&self, scope: &RelayScope) -> Result<(), SpawnError> {
+    fn spawn_scope<'sc>(&self, scope: &RelayScope<'sc>) -> Result<(), SpawnError>
+    where
+        Self: 'sc,
+    {
         scope.relay_to(self)
     }
 }
 
-impl<Sp: Spawn + Clone + Send + 'static> RelayScopeSpawning for Sp {}
+impl<Sp: Spawn + Clone + Send> RelayScopeSpawning for Sp {}
 
 /// A spawn scope that can be used to spawn futures of lifetime `'sc` onto multiple underlying spawns.
 ///
@@ -187,28 +192,16 @@ impl<'sc> RelayScope<'sc> {
     ///
     /// This will spawn a *relay-task* onto the given [`Spawn`] that will process the futures of this scope.
     /// For more details see [here](RelayScope#how-relaying-works).
-    pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'static)) -> Result<(), SpawnError> {
-        let fut =
-            unsafe { UnsafeRelayFuture::new_global(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        if let Some(fut) = fut {
-            spawn.spawn(fut)
-        } else {
-            Err(SpawnError::shutdown())
-        }
+    pub fn relay_to(&self, spawn: &(impl Spawn + Clone + Send + 'sc)) -> Result<(), SpawnError> {
+        relay_future::spawn_on_global(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id())
     }
 
     /// Relay this scope to the given local `spawn`.
     ///
     /// This will spawn a *relay-task* onto the given [`LocalSpawn`] that will process the futures of this scope.
     /// For more details see [here](RelayScope#how-relaying-works).
-    pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'static)) -> Result<(), SpawnError> {
-        let fut =
-            unsafe { UnsafeRelayFuture::new_local(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id()) };
-        if let Some(fut) = fut {
-            spawn.spawn_local(fut)
-        } else {
-            Err(SpawnError::shutdown())
-        }
+    pub fn relay_to_local(&self, spawn: &(impl LocalSpawn + Clone + 'sc)) -> Result<(), SpawnError> {
+        relay_future::spawn_on_local(self.pad.clone(), spawn.clone(), self.pad.next_spawn_id())
     }
 
     /// Returns a future that will complete the moment there are no more spawned futures in the scope.

@@ -10,6 +10,7 @@ use futures::channel::{mpsc, oneshot};
 use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
+use futures_scopes::local::LocalScope;
 use futures_scopes::relay::{new_relay_scope, RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning};
 use futures_scopes::{ScopedSpawn, ScopedSpawnExt, SpawnScope};
 
@@ -287,6 +288,23 @@ fn test_scope_in_scope() {
         .unwrap();
 
     block_on(outer_scope.until_empty());
+}
+
+#[test]
+fn test_scope_in_scope2() {
+    fn inner(outer: &RelayScope<'_>) {
+        let scope = new_relay_scope!(outer.spawner());
+        scope.relay_to(&outer.spawner()).unwrap();
+    }
+
+    inner(new_relay_scope!());
+
+    fn inner_local(outer: &LocalScope<'_>) {
+        let scope = new_relay_scope!(outer.spawner());
+        scope.relay_to_local(&outer.spawner()).unwrap();
+    }
+
+    inner_local(&LocalScope::new());
 }
 
 #[test]
