@@ -1,5 +1,6 @@
 use std::future::Future;
 
+use futures::future::{FutureExt, RemoteHandle};
 use futures::task::{FutureObj, SpawnError};
 
 /// A scope that can spawn non-static futures
@@ -31,6 +32,20 @@ pub trait ScopedSpawnExt<'a, T>: ScopedSpawn<'a, T> {
         Fut: Future<Output = T> + Send + 'a,
     {
         self.spawn_obj_scoped(FutureObj::new(Box::new(future)))
+    }
+
+    /// Spawns a task that polls the given future and returns a handle to its output.
+    ///
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
+    fn spawn_scoped_with_handle<Fut>(&self, future: Fut) -> Result<RemoteHandle<Fut::Output>, SpawnError>
+    where
+        Fut: Future + Send + 'a,
+        Fut::Output: Send + 'a,
+        Self: ScopedSpawnExt<'a, ()>,
+    {
+        let (remote, handle) = future.remote_handle();
+        let _: () = self.spawn_scoped(remote)?;
+        Ok(handle)
     }
 }
 

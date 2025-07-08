@@ -105,3 +105,10 @@ fn test_spawn_outside_until() {
         };
     });
 }
+
+#[test]
+fn test_spawn_local_with_handle() {
+    let mut scope = LocalScope::new();
+    let handle = scope.spawner().spawn_local_scoped_with_handle(async { 42 }).unwrap();
+    assert_eq!(block_on(scope.until(handle)), 42);
+}

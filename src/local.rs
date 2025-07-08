@@ -7,9 +7,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use futures::StreamExt;
+use futures::future::RemoteHandle;
 use futures::stream::FuturesUnordered;
 use futures::task::{FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError, noop_waker};
+use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 
 use crate::ScopedSpawn;
@@ -481,6 +482,22 @@ impl<'sc, T> LocalScopeSpawner<'sc, T> {
         Fut: Future<Output = T> + 'sc,
     {
         self.spawn_scoped_local_obj(LocalFutureObj::new(Box::new(future)))
+    }
+}
+
+impl<'sc> LocalScopeSpawner<'sc, ()> {
+    /// Spawns a task that polls the given local future and returns a handle to its output.
+    ///
+    /// # Errors
+    ///
+    /// This method returns a [`Result`] that contains a [`SpawnError`] if spawning fails.
+    pub fn spawn_local_scoped_with_handle<Fut>(&self, future: Fut) -> Result<RemoteHandle<Fut::Output>, SpawnError>
+    where
+        Fut: Future + 'sc,
+    {
+        let (remote, handle) = future.remote_handle();
+        let _: () = self.spawn_local_scoped(remote)?;
+        Ok(handle)
     }
 }
 

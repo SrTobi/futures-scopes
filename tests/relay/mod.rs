@@ -9,6 +9,7 @@ use std::thread;
 use futures::channel::{mpsc, oneshot};
 use futures::executor::{LocalPool, ThreadPool, ThreadPoolBuilder, block_on};
 use futures::task::Spawn;
+use futures::task::SpawnExt;
 use futures::{SinkExt, StreamExt};
 use futures_scopes::local::LocalScope;
 use futures_scopes::relay::{RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning, new_relay_scope};
@@ -145,6 +146,16 @@ fn test_can_continue_after_panic() {
     }
 
     assert!(called);
+}
+
+#[test]
+fn test_spawn_with_handle() {
+    let scope = new_relay_scope!();
+    let pool = ThreadPoolBuilder::new().pool_size(2).create().unwrap();
+    pool.spawn_scope(scope).unwrap();
+
+    let handle = scope.spawner().spawn_with_handle(async { 42 }).unwrap();
+    assert_eq!(block_on(handle), 42);
 }
 
 #[test]
