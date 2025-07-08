@@ -4,8 +4,8 @@ use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use futures::channel::oneshot;
 use futures::future::Shared;
 use futures::task::{FutureObj, SpawnError};

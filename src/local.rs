@@ -7,9 +7,9 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-use futures::stream::FuturesUnordered;
-use futures::task::{noop_waker, FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError};
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use futures::task::{FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError, noop_waker};
 use pin_project::pin_project;
 
 use crate::ScopedSpawn;

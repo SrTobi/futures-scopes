@@ -4,8 +4,8 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
-use futures::task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError};
 use futures::Future;
+use futures::task::{FutureObj, LocalFutureObj, LocalSpawn, LocalSpawnExt, Spawn, SpawnError};
 use pin_project::{pin_project, pinned_drop};
 
 use super::relay_pad::{RelayPad, TaskDequeueErr};
@@ -294,7 +294,7 @@ impl<'sc, Sp: 'sc> RelayFuture<'sc, Sp> {
                This spawn is not accessed after the RelayScope is dropped.
                and the spawn will live longer than the RelayScope.
         */
-        let static_fut = std::mem::transmute::<FutureObj<'sc, ()>, FutureObj<'static, ()>>(fut_obj);
+        let static_fut = unsafe { std::mem::transmute::<FutureObj<'sc, ()>, FutureObj<'static, ()>>(fut_obj) };
         Some(static_fut)
     }
 
@@ -310,7 +310,8 @@ impl<'sc, Sp: 'sc> RelayFuture<'sc, Sp> {
         let fut = Self::new(pad, spawn, root, manager)?;
         let fut_obj = LocalFutureObj::new(Box::new(fut));
         /* See RelayFuture::new_global_raw */
-        let static_fut = std::mem::transmute::<LocalFutureObj<'sc, ()>, LocalFutureObj<'static, ()>>(fut_obj);
+        let static_fut =
+            unsafe { std::mem::transmute::<LocalFutureObj<'sc, ()>, LocalFutureObj<'static, ()>>(fut_obj) };
         Some(static_fut)
     }
 }

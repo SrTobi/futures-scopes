@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use futures::channel::oneshot::channel;
 use futures::executor::block_on;
-use futures::{select_biased, FutureExt};
+use futures::{FutureExt, select_biased};
 use futures_scopes::local::LocalScope;
 
 #[test]
@@ -36,7 +36,7 @@ fn test_drop_without_spawner() {
                 .spawner()
                 .spawn_local_scoped(async move {
                     let _counter = counter;
-                    pending::<()>().await
+                    pending::<()>().await;
                 })
                 .unwrap();
         }

@@ -7,11 +7,11 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 use futures::channel::{mpsc, oneshot};
-use futures::executor::{block_on, LocalPool, ThreadPool, ThreadPoolBuilder};
+use futures::executor::{LocalPool, ThreadPool, ThreadPoolBuilder, block_on};
 use futures::task::Spawn;
 use futures::{SinkExt, StreamExt};
 use futures_scopes::local::LocalScope;
-use futures_scopes::relay::{new_relay_scope, RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning};
+use futures_scopes::relay::{RelayScope, RelayScopeLocalSpawning, RelayScopeSpawning, new_relay_scope};
 use futures_scopes::{ScopedSpawn, ScopedSpawnExt, SpawnScope};
 
 #[test]
@@ -47,7 +47,7 @@ fn test_drop_without_spawner() {
                 .spawner()
                 .spawn_scoped(async move {
                     let _counter = counter;
-                    pending::<()>().await
+                    pending::<()>().await;
                 })
                 .unwrap();
         }
@@ -250,7 +250,7 @@ fn test_waiting() {
 
     pool.run_until(async move {
         sx.send(0).unwrap();
-        println!("sent");
+        //println!("sent");
         assert_eq!(rx.await.unwrap(), N);
     });
 }
@@ -297,7 +297,10 @@ fn test_scope_in_scope2() {
         scope.relay_to(&outer.spawner()).unwrap();
     }
 
-    inner(new_relay_scope!());
+    {
+        let scope = new_relay_scope!();
+        inner(scope);
+    }
 
     fn inner_local(outer: &LocalScope<'_>) {
         let scope = new_relay_scope!(outer.spawner());
@@ -370,6 +373,7 @@ fn test_run_on_multiple_pools() {
 }
 
 // An async example function that has access to some kind of spawner
+#[allow(clippy::print_stdout)]
 async fn example(spawn: &(impl Spawn + Clone + Send + 'static)) {
     let counter = AtomicUsize::new(0);
 

@@ -1,14 +1,14 @@
 use std::hint::black_box;
 
 use futures::{
-    executor::{block_on, ThreadPool},
+    FutureExt, SinkExt, StreamExt,
+    executor::{ThreadPool, block_on},
     future::BoxFuture,
     task::SpawnExt,
-    FutureExt, SinkExt, StreamExt,
 };
 use futures_scopes::{
-    relay::{new_relay_scope, RelayScopeSpawner},
     ScopedSpawnExt, SpawnScope,
+    relay::{RelayScopeSpawner, new_relay_scope},
 };
 
 async fn func(spawner: RelayScopeSpawner<'static>, depth: usize) {

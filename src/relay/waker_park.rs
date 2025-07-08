@@ -1,5 +1,5 @@
-use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::sync::Mutex;
+use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::task::Waker;
 
 #[derive(Debug)]

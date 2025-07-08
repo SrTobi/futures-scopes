@@ -49,7 +49,7 @@ impl<Sp: Spawn + Clone + Send> RelayScopeSpawning for Sp {}
 ///                any future that was spawned onto the scope
 ///                (unlike [`LocalScope::until_empty`](crate::local::LocalScope::until_empty)).
 ///
-/// To safely create a RelayScope, use [`new_relay_scope!`].
+/// To safely create a `RelayScope`, use [`new_relay_scope!`].
 ///
 /// # Dropping
 ///
@@ -159,7 +159,7 @@ macro_rules! __new_relay_scope__ {
 pub use __new_relay_scope__ as new_relay_scope;
 
 impl RelayScope<'static> {
-    /// Creates a new RelayScope that can only spawn static futures.
+    /// Creates a new `RelayScope` that can only spawn static futures.
     pub fn new() -> Self {
         unsafe { Self::unchecked_new() }
     }
@@ -172,16 +172,16 @@ impl Default for RelayScope<'static> {
 }
 
 impl<'sc> RelayScope<'sc> {
-    /// Creates a new RelayScope
+    /// Creates a new `RelayScope`
     ///
     /// Spawned futures can reference everything covered by `'sc`.
     ///
     /// # Safety
-    /// It is of utmost important that the created scope is dropped at the end of 'sc.
+    /// It is of utmost important that the created scope is dropped at the end of `'sc`.
     /// Especially [`std::mem::forget`] should not be used on this type.
     /// Failing to drop this correctly can lead to spawned futures having references
     /// into undefined memory (namely when they reference something on the stack that is already popped).
-    /// Use [`new_relay_scope`] to safely create a RelayScope, that cannot **not** be dropped.
+    /// Use [`new_relay_scope`] to safely create a `RelayScope`, that cannot **not** be dropped.
     pub unsafe fn unchecked_new() -> Self {
         Self {
             pad: Arc::new(RelayPad::new()),
